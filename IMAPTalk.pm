@@ -124,7 +124,6 @@ use IO::Handle;
 use IO::Socket;
 use Digest;
 use Data::Dumper;
-use Mail::FolderState;
 
 # Use Time::HiRes if available to handle select restarts
 eval 'use Time::HiRes qw(time);';
@@ -1143,11 +1142,6 @@ sub select {
       $foldermode = 'read-only';
     }
     $Self->{CurrentFolderMode} = $foldermode;
-
-    $Self->{FolderState}->{$Folder} = Mail::FolderState->new({
-        UidNext     => $Self->get_response_code('uidnext'),
-        ModSeq      => $Self->get_response_code('highestmodseq'),
-        UidValidity => $Self->get_response_code('uidvalidity') });
 
     # Set to selected state
     $Self->state(Selected);
