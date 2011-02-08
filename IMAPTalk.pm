@@ -122,7 +122,6 @@ use Socket;
 use IO::Select;
 use IO::Handle;
 use IO::Socket;
-use Encode::IMAPUTF7;
 use Digest;
 use Data::Dumper;
 use Mail::FolderState;
@@ -1077,7 +1076,10 @@ sub set_tracing {
 sub set_unicode_folders {
   my $Self = shift;
   $Self->{Cache}->{UnicodeFolders} = shift;
-  require Encode if $Self->{Cache}->{UnicodeFolders};
+  if ($Self->{Cache}->{UnicodeFolders}) {
+    require Encode;
+    require Encode::IMAPUTF7;
+  }
 }
 
 sub unicode_folders {
