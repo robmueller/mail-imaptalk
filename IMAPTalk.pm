@@ -3016,8 +3016,9 @@ sub _parse_response {
       delete $Self->{PartialResp};
 
       # Extract items inside [...]
-      if ($Line =~ /\[(.*)\](.*)$/) {
+      if ($Line =~ /\[(.*)\] ?(.*)$/) {
         $Self->{ReadLine} = $1;
+        $Self->{Cache}->{remainder} = $2;
         # Use atom parser to get internal items
         $Res1 = lc($Self->_next_atom());
         goto RepeatSwitch;
