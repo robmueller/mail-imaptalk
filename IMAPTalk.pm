@@ -119,6 +119,7 @@ our $VERSION = '1.04';
 # Use modules {{{
 use Fcntl qw(:DEFAULT);
 use Socket;
+use Carp;
 use IO::Select;
 use IO::Handle;
 use IO::Socket;
@@ -491,7 +492,7 @@ sub new {
       || return undef;
     my $paddr = sockaddr_in($Port, inet_aton($Server));
     connect($Socket, $paddr) || return undef;
-    
+
     # Force flushing after every write to the socket
     my $ofh = select($Socket); $| = 1; select ($ofh);
 
@@ -2943,7 +2944,7 @@ sub _parse_response {
   my $Tag = '';
 
   # Store completion response and data responses
-  my ($DataResp, $CompletionResp, $Res1);
+  my ($DataResp, $CompletionResp, $Res1, $Callback);
   while ($Tag ne $Self->{CmdId}) {
     # Force starting new line read
     $Self->{ReadLine} = undef;
@@ -2959,11 +2960,21 @@ sub _parse_response {
     if ($Res1 =~ /^(\d+)$/) {
 
       my $Res2 = lc($Self->_next_simple_atom());
-      if ($Res2 eq 'exists' || $Res2 eq 'recent' || $Res2 eq 'expunge') {
+
+      # Parse fetch response into perl structure
+      my $Fetch;
+      if ($Res2 eq 'fetch') {
+        $Fetch = _parse_fetch_result($Self->_next_atom(), $Self->{ParseMode});
+      }
+
+      if (ref($RespItems) && ($Callback = $RespItems->{$Res2})) {
+        $Callback->($Res2, $Fetch || $Res1);
+
+      } elsif ($Res2 eq 'exists' || $Res2 eq 'recent' || $Res2 eq 'expunge') {
         $Self->{Cache}->{$Res2} = $Res1;
+
       } elsif ($Res2 eq 'fetch') {
         # Handle fetch response
-        my $Fetch = _parse_fetch_result($Self->_next_atom(), $Self->{ParseMode});
         if ($Self->{LastCmd} eq 'fetch') {
           # If UID mode, and got fetch result, transform from ID -> UID hash
           $Res1 = $Fetch->{uid} if $Self->{Uid};
@@ -2983,6 +2994,9 @@ sub _parse_response {
         # Don't know other response types, just return the atom
         $DataResp = $Self->_next_atom();
       }
+
+    } elsif (ref($RespItems) && ($Callback = $RespItems->{$Res1})) {
+       $Callback->($Res1, $Self->_remaining_atoms($Res1 =~ /sort/ ? 1 : 0));
 
     } elsif ($Res1 eq 'search' || $Res1 eq 'sort') {
       my $IdList = $Self->_remaining_atoms(1);
@@ -3696,6 +3710,13 @@ sub _fix_folder_name {
   {
     $FolderName = Encode::encode( 'IMAP-UTF-7', $FolderName );
   }
+
+  if (! $Self->unicode_folders() ) {
+    warn("Please report to rjlov");
+    Carp::cluck("Warning only: IMAPTalk not using unicode_folders");
+    warn("Please report to rjlov");
+  }
+
   return $FolderName if $WildCard && $FolderName =~ /[\*\%]/;
 
   # XXX - make more general/configurable
@@ -3732,7 +3753,14 @@ sub _unfix_folder_name {
     && ( $FolderName =~ m{&} ) )
   {
     $FolderName = Encode::decode( 'IMAP-UTF-7', $FolderName );
+  } 
+  
+  if (! $Self->unicode_folders() ) {
+    warn("Please report to rjlov");
+    Carp::cluck("Warning only: IMAPTalk not using unicode_folders");
+    warn("Please report to rjlov");
   }
+
   return $FolderName;
 }
 
@@ -4100,6 +4128,22 @@ sub _read_int_list {
   push @List, int($final) if $final ne '';
 
   return \@List;
+}
+
+=item I<_expand_sequence(@Sequences)>
+
+Expand a list of IMAP id sequences into a full list of ids
+
+=cut
+sub _expand_sequence {
+  my @Ids;
+  for (@_) {
+    push(@Ids, int($1) .. int($2)), redo if /\G(\d+):(\d+),?/gc;
+    push(@Ids, int($1)), redo if /\G(\d+),?/gc;
+    next if /\G$/;
+    die "unexpected sequence: " . substr($_, pos($_));
+  }
+  return @Ids;
 }
 
 =back
