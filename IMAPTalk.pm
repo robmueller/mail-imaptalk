@@ -1630,6 +1630,54 @@ sub getannotation {
   return $Self->_imap_cmd("getannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
 }
 
+
+=item I<getmetadata($FolderName, [$Options], @Entries)>
+
+Perform the IMAP 'getmetadata' command to get the metadata items
+for a mailbox.  See RFC5464 for details.
+
+If $Options is passed, it is a hashref of options to set.
+
+If foldername is the empty string, gets server annotations
+
+Examples:
+
+  my $Result = $IMAP->getmetadata('user.joe.blah', {depth => 'infinity'}, '/shared') || die "IMAP error: $@";
+  $Result = {
+    'user.joe.blah' => {
+      '/shared/vendor/cmu/cyrus-imapd/size' => '19261',
+      '/shared/vendor/cmu/cyrus-imapd/lastupdate' => '26-Mar-2004 13:31:56 -0800',
+      '/shared/vendor/cmu/cyrus-imapd/partition' => 'default',
+    }
+  };
+
+  my $Result = $IMAP->getmetadata('', "/shared/comment");
+  $Result => {
+    '' => {
+      '/shared/comment' => "Shared comment",
+    }
+  };
+
+=cut
+sub getmetadata {
+  my $Self = shift;
+  my $foldername = shift;
+  my @Opts;
+  if ($_[0] and ref($_[0]) eq 'HASH') {
+    my $val = shift;
+    push @Opts, "(" . join (' ', %$val) . ")";
+  }
+  my $folderspec = ($foldername eq '') ? '' : $Self->_fix_folder_name($foldername, 1);
+  $Self->_require_capability('metadata') || return undef;
+
+  # it's possible to have no responses if we didn't match anything
+  $Self->{Responses}->{metadata} = undef;
+  my $res = $Self->_imap_cmd("getmetadata", 0, "", $folderspec, @Opts, _quote_list(@_));
+  my $NoData = !ref($res) && $res && $Self->{LastRespCode} =~ /^ok/i;
+  return {} if $NoData;
+  return $res;
+}
+
 =item I<setannotation($FolderName, $Entry, $Attribute, [ $Entry, $Attribute ], ... )>
 
 Perform the IMAP 'setannotation' command to get the annotation(s)
@@ -1645,6 +1693,22 @@ sub setannotation {
   my $Self = shift;
   $Self->_require_capability('annotatemore') || return undef;
   return $Self->_imap_cmd("setannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
+}
+
+=item I<setmetadata($FolderName, $Name, $Value, $Name2, $Value2)>
+
+Perform the IMAP 'setmetadata' command.  See RFC 5464 for details.
+
+Examples:
+
+  my $Result = $IMAP->setmetadata('user.joe.blah', '/comment', 'A comment')
+    || die "IMAP error: $@";
+
+=cut
+sub setmetadata {
+  my $Self = shift;
+  $Self->_require_capability('metadata') || return undef;
+  return $Self->_imap_cmd("setmetadata", 0, "", $Self->_fix_folder_name(+shift, 1), _quote_list([@_]));
 }
 
 =item I<multigetannotation($Entry, $Attribute, @FolderNames)>
@@ -3085,6 +3149,12 @@ sub _parse_response {
       my ($Name, $Entry, $Attributes) = @{$Self->_remaining_atoms()};
       $Name = $Self->_unfix_folder_name($Name);
       $DataResp{annotation}->{$Name}->{$Entry} = { @{$Attributes || []} };
+
+    } elsif ($Res1 eq 'metadata') {
+      my ($Name, $Bits) = @{$Self->_remaining_atoms()};
+      $Name = $Self->_unfix_folder_name($Name);
+      $DataResp = {} if ref($DataResp) ne 'HASH';
+      $DataResp->{$Name}->{$Bits->[0]} = $Bits->[1];
 
     } elsif (($Res1 eq 'bye') && ($Self->{LastCmd} ne 'logout')) {
       die "IMAPTalk: Connection was unexpectedly closed by host";
