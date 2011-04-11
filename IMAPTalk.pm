@@ -642,10 +642,10 @@ sub capability {
     if exists $Self->{Cache}->{capability};
 
   # Otherwise execute capability command
-  my %Capability = map { lc($_), 1 } ($Self->_imap_cmd("capability", 0, "capability"));
+  my $Capability = $Self->_imap_cmd("capability", 0, "capability");
 
   # Save for any future queries and return
-  return ($Self->{Cache}->{capability} = \%Capability);
+  return ($Self->{Cache}->{capability} = $Capability);
 }
 
 =item I<namespace()>
@@ -687,7 +687,7 @@ Enabled the given imap extension
 sub enable {
   my $Self = shift;
 
-  return $Self->_imap_cmd("enable", 0, "", @_);
+  return $Self->_imap_cmd("enable", 0, "enabled", @_);
 }
 
 =item I<is_open()>
@@ -1100,10 +1100,10 @@ prefix as described in C<set_root_folder()>.
 =over 4
 =cut
 
-=item I<select($FolderName, $ReadOnly)>
+=item I<select($FolderName, @Opts)>
 
 Perform the standard IMAP 'select' command to select a folder for
-retrieving/moving/adding messages. If $ReadOnly is defined, the 
+retrieving/moving/adding messages. If $Opts{ReadOnly} is true, the 
 IMAP EXAMINE verb is used instead of SELECT.
 
 Mail::IMAPTalk will cache the currently selected folder, and if you
@@ -1114,7 +1114,14 @@ first, then ->select().
 
 =cut
 sub select {
-  my ($Self, $Folder, $ReadOnly, @ExtraOpts) = @_;
+  my ($Self, $Folder, %Opts) = @_;
+
+  my $unselect = delete($Opts{unselect});
+  my $ReadOnly = delete($Opts{ReadOnly});
+
+  if ($unselect) {
+    $Self->unselect();
+  }
 
   # Are we already selected and in the same mode?
   if ($Self->_is_current_folder($Folder) &&
@@ -1133,7 +1140,7 @@ sub select {
 
   # Do select command
   my $Cmd = $ReadOnly ? "examine" : "select";
-  my $Res = $Self->_imap_cmd($Cmd, 0, "", { Quote => $FixFolder }, @ExtraOpts);
+  my $Res = $Self->_imap_cmd($Cmd, 0, "", { Quote => $FixFolder }, keys(%Opts));
   if ($Res) {
     # Set internal current folder and mode
     $Self->{CurrentFolder} = $Folder;
@@ -1186,7 +1193,7 @@ See C<select()> for more details.
 
 =cut
 sub examine {
-  return $_[0]->select($_[1], 1);
+  return $_[0]->select($_[1], ReadOnly => 1);
 }
 
 =item I<create($FolderName)>
@@ -1352,7 +1359,7 @@ Examples:
 sub setacl {
   my $Self = shift;
   $Self->_require_capability('acl') || return undef;
-  return $Self->_imap_cmd("setacl", 0, "", $Self->_fix_folder_name(+shift), @_);
+  return $Self->_imap_cmd("setacl", 0, "acl", $Self->_fix_folder_name(+shift), @_);
 }
 
 =item I<getacl($FolderName)>
@@ -1386,7 +1393,7 @@ Examples:
 sub getacl {
   my $Self = shift;
   $Self->_require_capability('acl') || return undef;
-  return $Self->_imap_cmd("getacl", 0, "", $Self->_fix_folder_name(+shift), @_);
+  return $Self->_imap_cmd("getacl", 0, "acl", $Self->_fix_folder_name(+shift), @_);
 }
 
 =item I<deleteacl($FolderName, $Username)>
@@ -1476,7 +1483,7 @@ sub getquota {
   my $Self = shift;
   $Self->_require_capability('quota') || return undef;
   my $Folder = $Self->_fix_folder_name(+shift);
-  my @Res = $Self->_imap_cmd("getquota", 0, "", $Folder, @_);
+  my @Res = $Self->_imap_cmd("getquota", 0, "quota", $Folder, @_);
   return (ref($Res[0]) eq 'HASH') ? @{$Res[0]->{$Folder}} : @Res;
 }
 
@@ -1516,7 +1523,7 @@ Examples:
 sub getquotaroot {
   my $Self = shift;
   $Self->_require_capability('quota') || return undef;
-  return $Self->_imap_cmd("getquotaroot", 0, "", $Self->_fix_folder_name(+shift), @_);
+  return $Self->_imap_cmd("getquotaroot", 0, "quota", $Self->_fix_folder_name(+shift), @_);
 }
 
 =item I<message_count($FolderName)>
@@ -1620,7 +1627,7 @@ Examples:
 sub getannotation {
   my $Self = shift;
   $Self->_require_capability('annotatemore') || return undef;
-  return $Self->_imap_cmd("getannotation", 0, "", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
+  return $Self->_imap_cmd("getannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
 }
 
 =item I<setannotation($FolderName, $Entry, $Attribute, [ $Entry, $Attribute ], ... )>
@@ -1637,7 +1644,7 @@ Examples:
 sub setannotation {
   my $Self = shift;
   $Self->_require_capability('annotatemore') || return undef;
-  return $Self->_imap_cmd("setannotation", 0, "", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
+  return $Self->_imap_cmd("setannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
 }
 
 =item I<multigetannotation($Entry, $Attribute, @FolderNames)>
@@ -1896,7 +1903,7 @@ Examples:
 sub store {
   my $Self = shift;
   $Self->cb_folder_changed($Self->{CurrentFolder});
-  return $Self->_imap_cmd("store", 1, "", _fix_message_ids(+shift), @_);
+  return $Self->_imap_cmd("store", 1, "fetch", _fix_message_ids(+shift), @_);
 }
 
 =item I<expunge()>
@@ -2792,7 +2799,7 @@ sub _imap_cmd {
 
   # Return undef if any error occurred (either through 'die' or non-'OK' IMAP response)
   if ($@) {
-    warn($@);
+    warn($@) if $@ !~ /NO Over quota/;
     if ($@ =~ /IMAPTalk/) {
       $Self->{LastError} = $@ = "IMAP Command : '$Cmd' failed. Reason was : $@";
       return undef;
@@ -2941,10 +2948,12 @@ sub _parse_response {
   my ($Self, $RespItems) = @_;
 
   # Loop until we get the tagged response for the sent command
+  my $Result;
   my $Tag = '';
+  my $LastCmd = $Self->{LastCmd};
 
   # Store completion response and data responses
-  my ($DataResp, $CompletionResp, $Res1, $Callback);
+  my (%DataResp, $CompletionResp, $Res1, $Callback);
   while ($Tag ne $Self->{CmdId}) {
     # Force starting new line read
     $Self->{ReadLine} = undef;
@@ -2971,96 +2980,86 @@ sub _parse_response {
         $Callback->($Res2, $Fetch || $Res1);
 
       } elsif ($Res2 eq 'exists' || $Res2 eq 'recent' || $Res2 eq 'expunge') {
-        $Self->{Cache}->{$Res2} = $Res1;
+        $DataResp{$Res2} = $Res1;
 
       } elsif ($Res2 eq 'fetch') {
-        # Handle fetch response
-        if ($Self->{LastCmd} eq 'fetch') {
-          # If UID mode, and got fetch result, transform from ID -> UID hash
-          $Res1 = $Fetch->{uid} if $Self->{Uid};
-          $Res1 ||= '';
-          # Store the result in our response hash
-          $DataResp = $Self->{PartialResp} = {}
-            if ref($DataResp) ne 'HASH';
-          $DataResp->{$Res1} ||= {};
-          %{$DataResp->{$Res1}} = (%{$DataResp->{$Res1}}, %$Fetch);
+        # If UID mode, and got fetch result, transform from ID -> UID hash
+        $Res1 = $Fetch->{uid} if $Self->{Uid};
+        $Res1 ||= '';
+        # Store the result in our response hash
+        my $FetchRes = ($DataResp{fetch}->{$Res1} ||= {});
+        %$FetchRes = (%$FetchRes, %$Fetch);
 
-        # Fetch response not due to fetch command, place
-        # in cache buffer instead of overwriting $DataResp
-        } else {
-          $Self->{Cache}->{$Res2}->{$Res1} = $Fetch;
-        }
-      } elsif (!$DataResp) {
-        # Don't know other response types, just return the atom
-        $DataResp = $Self->_next_atom();
+      } else {
+        # Don't know other response types, just store the atom
+        $DataResp{$Res2} = $Self->_next_atom();
       }
 
     } elsif (ref($RespItems) && ($Callback = $RespItems->{$Res1})) {
        $Callback->($Res1, $Self->_remaining_atoms($Res1 =~ /sort/ ? 1 : 0));
 
+    } elsif ($Res1 eq 'ok') {
+      # If OK, probably something like * OK [... ]
+      my $Line = $DataResp{remainder} = $Self->_remaining_line();
+
+      # Extract items inside [...]
+      if ($Line =~ /\[(.*)\] ?(.*)$/) {
+        $Self->{ReadLine} = $1;
+        $DataResp{remainder} = $2;
+        # Use atom parser to get internal items
+        $Res1 = lc($Self->_next_atom());
+        goto RepeatSwitch;
+      }
+
     } elsif ($Res1 eq 'search' || $Res1 eq 'sort') {
       my $IdList = $Self->_remaining_atoms(1);
 
       # AOL server returns multiple SEARCH responses
-      if (ref($DataResp) eq 'ARRAY') {
-        push @$DataResp, @$IdList;
+      if (ref($DataResp{$Res1}) eq 'ARRAY') {
+        push @{$DataResp{$Res1}}, @$IdList;
       } else {
         # Avoid data copy if possible, could be large UID list
-        $DataResp = $IdList;
+        $DataResp{$Res1} = $IdList;
       }
 
-    } elsif ($Res1 eq 'flags' || $Res1 eq 'status' || $Res1 eq 'capability' ||
+    } elsif ($Res1 eq 'flags' || $Res1 eq 'status' ||
              $Res1 eq 'thread' || $Res1 eq 'namespace') {
-      $DataResp = $Self->_remaining_atoms();
+      $DataResp{$Res1} = $Self->_remaining_atoms();
 
     } elsif ($Res1 eq 'list' || $Res1 eq 'lsub') {
       my ($Attr, $Sep, $Name) = @{$Self->_remaining_atoms()};
       $Self->_set_separator($Sep);
       # Remove root text from folder name
       $Name = $Self->_unfix_folder_name($Name);
-      $DataResp = [] if ref($DataResp) ne 'ARRAY';
-      push @$DataResp, [ $Attr, $Sep, $Name ];
-
-    } elsif ($Res1 eq 'ok') {
-      # If OK, probably something like * OK [... ]
-      my $Line = $Self->_remaining_line();
-      $Res1 = $Line;
-
-      # Full response, don't keep around unneeded data reference
-      delete $Self->{PartialResp};
-
-      # Extract items inside [...]
-      if ($Line =~ /\[(.*)\] ?(.*)$/) {
-        $Self->{ReadLine} = $1;
-        $Self->{Cache}->{remainder} = $2;
-        # Use atom parser to get internal items
-        $Res1 = lc($Self->_next_atom());
-        goto RepeatSwitch;
-      }
+      my $List = ($DataResp{$Res1} ||= []);
+      push @$List, [ $Attr, $Sep, $Name ];
 
     } elsif ($Res1 eq 'permanentflags' || $Res1 eq 'uidvalidity' ||
-      $Res1 eq 'uidnext' || $Res1 eq 'highestmodseq') {
-      $Self->{Cache}->{$Res1} = $Self->_next_atom();
+      $Res1 eq 'uidnext' || $Res1 eq 'highestmodseq' || $Res1 eq 'numresults') {
+      $DataResp{$Res1} = $Self->_remaining_atoms();
       $Self->_remaining_line();
 
     } elsif ($Res1 eq 'alert' || $Res1 eq 'newname' ||
       $Res1 eq 'parse' || $Res1 eq 'trycreate') {
-      $Self->{Cache}->{$Res1} = $Self->_remaining_line();
+      $DataResp{$Res1} = $Self->_remaining_line();
+
+    } elsif ($Res1 eq 'capability') {
+      $DataResp{$Res1} = { map { lc($_) => 1 } @{$Self->_remaining_atoms() || []} };
 
     } elsif ($Res1 eq 'vanished') {
-      $Self->{Cache}->{$Res1} = $Self->_remaining_atoms();
+      $DataResp{$Res1} = $Self->_remaining_atoms();
 
     } elsif ($Res1 eq 'appenduid') {
-      $Self->{Cache}->{$Res1} = [ $Self->_next_atom(), $Self->_next_atom() ];
+      $DataResp{$Res1} = [ $Self->_next_atom(), $Self->_next_atom() ];
       $Self->_remaining_line();
 
     } elsif ($Res1 eq 'copyuid') {
-      $Self->{Cache}->{$Res1} = [ $Self->_next_atom(), $Self->_next_atom(), $Self->_next_atom() ];
+      $DataResp{$Res1} = [ $Self->_next_atom(), $Self->_next_atom(), $Self->_next_atom() ];
       $Self->_remaining_line();
 
     } elsif ($Res1 eq 'read-write' || $Res1 eq 'read-only') {
-      $Self->{Cache}->{$Res1} = 1;
-      $Self->{Cache}->{foldermode} = $Res1;
+      $DataResp{$Res1} = 1;
+      $DataResp{foldermode} = $Res1;
       $Self->_remaining_line();
 
     } elsif ($Res1 eq 'quota') {
@@ -3068,34 +3067,33 @@ sub _parse_response {
       # If just a 'getquota', just return triplets. If a 'getrootquota',
       #  build the hash response
       my ($qfolder, $qlimits) = ($Self->_next_atom(), $Self->_next_atom());
-      if (ref($DataResp)) {
-        $DataResp->{$qfolder} = $qlimits;
+      if (ref($DataResp{$Res1})) {
+        $DataResp{$Res1}->{$qfolder} = $qlimits;
       } else {
-        $DataResp = $qlimits;
+        $DataResp{$Res1} = $qlimits;
       }
 
     } elsif ($Res1 eq 'quotaroot') {
       # Result is: foldername rootitems
-      $DataResp = { 'quotaroot' => $Self->_remaining_atoms() };
+      $DataResp{quota} = { 'quotaroot' => $Self->_remaining_atoms() };
 
     } elsif ($Res1 eq 'acl') {
-      $DataResp = $Self->_remaining_atoms();
-      shift @$DataResp;
+      $DataResp{acl} = $Self->_remaining_atoms();
+      shift @{$DataResp{acl}};
 
     } elsif ($Res1 eq 'annotation') {
       my ($Name, $Entry, $Attributes) = @{$Self->_remaining_atoms()};
       $Name = $Self->_unfix_folder_name($Name);
-      $DataResp = {} if ref($DataResp) ne 'HASH';
-      $DataResp->{$Name}->{$Entry} = { @{$Attributes || []} };
+      $DataResp{annotation}->{$Name}->{$Entry} = { @{$Attributes || []} };
 
     } elsif (($Res1 eq 'bye') && ($Self->{LastCmd} ne 'logout')) {
       die "IMAPTalk: Connection was unexpectedly closed by host";
 
     } elsif ($Res1 eq 'no') {
-      $DataResp = $Self->_remaining_line();
+      $Result = $Self->_remaining_line();
 
     } else {
-      $Res1 = $Self->_remaining_line();
+      $DataResp{$Res1} = $Self->_remaining_line();
     }
 
     # Should have read all of line
@@ -3105,7 +3103,13 @@ sub _parse_response {
 
   }
 
-  return ($CompletionResp, $DataResp || $Res1);
+  # Return the requested item from %DataResp, and put
+  #  the rest in $Self->{Cache}
+  $Result ||= delete $DataResp{$RespItems} if !ref $RespItems;
+  $Result ||= $Res1;
+  $Self->{Cache}->{$_} = $DataResp{$_} for keys %DataResp;
+
+  return ($CompletionResp, $Result);
 }
 
 =item I<_require_capability($Self, $Capability)>
