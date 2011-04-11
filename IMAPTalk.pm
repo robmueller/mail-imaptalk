@@ -322,6 +322,9 @@ my $NeedDecodeUTF8Regexp = qr/=\?$RFC1522Token\?$RFC1522Token\?[^\?]*\?=/;
 # Known untagged responses
 my %UntaggedResponses = map { $_ => 1 } qw(exists expunge recent);
 
+# Default responses
+my %RespDefaults = ('annotation' => 'hash', 'metadata' => 'hash', 'fetch' => 'hash', 'list' => 'array', 'lsub' => 'array');
+
 # }}}
 
 =head1 CONSTRUCTOR
@@ -1669,13 +1672,7 @@ sub getmetadata {
   }
   my $folderspec = ($foldername eq '') ? '' : $Self->_fix_folder_name($foldername, 1);
   $Self->_require_capability('metadata') || return undef;
-
-  # it's possible to have no responses if we didn't match anything
-  $Self->{Responses}->{metadata} = undef;
-  my $res = $Self->_imap_cmd("getmetadata", 0, "", $folderspec, @Opts, _quote_list(@_));
-  my $NoData = !ref($res) && $res && $Self->{LastRespCode} =~ /^ok/i;
-  return {} if $NoData;
-  return $res;
+  return $Self->_imap_cmd("getmetadata", 0, "metadata", $folderspec, @Opts, _quote_list(@_));
 }
 
 =item I<setannotation($FolderName, $Entry, $Attribute, [ $Entry, $Attribute ], ... )>
@@ -1708,7 +1705,7 @@ Examples:
 sub setmetadata {
   my $Self = shift;
   $Self->_require_capability('metadata') || return undef;
-  return $Self->_imap_cmd("setmetadata", 0, "", $Self->_fix_folder_name(+shift, 1), _quote_list([@_]));
+  return $Self->_imap_cmd("setmetadata", 0, "metadata", $Self->_fix_folder_name(+shift, 1), _quote_list([@_]));
 }
 
 =item I<multigetannotation($Entry, $Attribute, @FolderNames)>
@@ -1870,9 +1867,8 @@ sub fetch {
   $Self->{Responses}->{fetch} = undef;
   my $FetchRes = $Self->_imap_cmd("fetch", 1, "fetch", _fix_message_ids(+shift), @_);
 
-  my $NoFetchData = !ref($FetchRes) && $FetchRes && $Self->{LastRespCode} =~ /^ok/i;
-
   # Single message fetch with no data returns
+  my $NoFetchData = ref($FetchRes) && !%$FetchRes;
   if ($NoFetchData && $FetchOne) {
     $Self->{LastError} = $@ = "Fetch of message uid $FetchOne failed. Message deleted by POP or other IMAP connection.";
     return undef;
@@ -3014,10 +3010,18 @@ sub _parse_response {
   # Loop until we get the tagged response for the sent command
   my $Result;
   my $Tag = '';
-  my $LastCmd = $Self->{LastCmd};
+  my (%DataResp, $CompletionResp, $Res1, $Callback);
+
+  # Some commands might have no results (eg list, fetch, etc), but we
+  #  want to distinguish no results vs NO result, so setup a default
+  #  empty hash/array for these commands as appropriate.
+  #  Create empty hash/array, don't copy ref to global!
+  if (!ref($RespItems) && (my $RespDefault = $RespDefaults{$RespItems})) {
+    $DataResp{$RespItems} = {} if $RespDefault eq 'hash';
+    $DataResp{$RespItems} = [] if $RespDefault eq 'array';
+  }
 
   # Store completion response and data responses
-  my (%DataResp, $CompletionResp, $Res1, $Callback);
   while ($Tag ne $Self->{CmdId}) {
     # Force starting new line read
     $Self->{ReadLine} = undef;
@@ -3095,8 +3099,7 @@ sub _parse_response {
       $Self->_set_separator($Sep);
       # Remove root text from folder name
       $Name = $Self->_unfix_folder_name($Name);
-      my $List = ($DataResp{$Res1} ||= []);
-      push @$List, [ $Attr, $Sep, $Name ];
+      push @{$DataResp{$Res1}}, [ $Attr, $Sep, $Name ];
 
     } elsif ($Res1 eq 'permanentflags' || $Res1 eq 'uidvalidity' ||
       $Res1 eq 'uidnext' || $Res1 eq 'highestmodseq' || $Res1 eq 'numresults') {
@@ -3153,8 +3156,7 @@ sub _parse_response {
     } elsif ($Res1 eq 'metadata') {
       my ($Name, $Bits) = @{$Self->_remaining_atoms()};
       $Name = $Self->_unfix_folder_name($Name);
-      $DataResp = {} if ref($DataResp) ne 'HASH';
-      $DataResp->{$Name}->{$Bits->[0]} = $Bits->[1];
+      $DataResp{metadata}->{$Name}->{$Bits->[0]} = $Bits->[1];
 
     } elsif (($Res1 eq 'bye') && ($Self->{LastCmd} ne 'logout')) {
       die "IMAPTalk: Connection was unexpectedly closed by host";
