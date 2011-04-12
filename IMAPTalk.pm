@@ -689,8 +689,18 @@ Enabled the given imap extension
 =cut
 sub enable {
   my $Self = shift;
+  my $Feature = shift;
 
-  return $Self->_imap_cmd("enable", 0, "enabled", @_);
+  # If we've already executed the enable command once, just return the results
+  return $Self->{Cache}->{enable}->{$Feature}
+    if exists $Self->{Cache}->{enable}->{$Feature};
+
+  $Self->_require_capability($Feature) || return undef;
+
+  my $Result = $Self->_imap_cmd("enable", 0, "enabled", $Feature);
+  $Self->{Cache}->{enable} = $Result;
+
+  return $Result && $Result->{$Feature};
 }
 
 =item I<is_open()>
@@ -1630,11 +1640,11 @@ Examples:
 sub getannotation {
   my $Self = shift;
   $Self->_require_capability('annotatemore') || return undef;
-  return $Self->_imap_cmd("getannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
+  return $Self->_imap_cmd("getannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), { Quote => $_[0] }, { Quote => $_[1] });
 }
 
 
-=item I<getmetadata($FolderName, [$Options], @Entries)>
+=item I<getmetadata($FolderName, [ \%Options ], @Entries)>
 
 Perform the IMAP 'getmetadata' command to get the metadata items
 for a mailbox.  See RFC5464 for details.
@@ -1664,18 +1674,17 @@ Examples:
 =cut
 sub getmetadata {
   my $Self = shift;
-  my $foldername = shift;
-  my @Opts;
-  if ($_[0] and ref($_[0]) eq 'HASH') {
-    my $val = shift;
-    push @Opts, "(" . join (' ', %$val) . ")";
-  }
-  my $folderspec = ($foldername eq '') ? '' : $Self->_fix_folder_name($foldername, 1);
   $Self->_require_capability('metadata') || return undef;
-  return $Self->_imap_cmd("getmetadata", 0, "metadata", $folderspec, @Opts, _quote_list(@_));
+
+  # First arg is folder name
+  my @Args = $Self->_fix_folder_name(+shift, 0);
+  # Next is optional hash of options
+  push @Args, [%{ +shift }] if ref($_[0]) eq 'HASH';
+
+  return $Self->_imap_cmd("getmetadata", 0, "metadata", @Args, { Quote => [ @_ ] });
 }
 
-=item I<setannotation($FolderName, $Entry, $Attribute, [ $Entry, $Attribute ], ... )>
+=item I<setannotation($FolderName, $Entry, [ $Attribute, $Value ])>
 
 Perform the IMAP 'setannotation' command to get the annotation(s)
 for a mailbox.  See imap-annotatemore extension for details.
@@ -1689,7 +1698,7 @@ Examples:
 sub setannotation {
   my $Self = shift;
   $Self->_require_capability('annotatemore') || return undef;
-  return $Self->_imap_cmd("setannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), _quote_list(@_));
+  return $Self->_imap_cmd("setannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), { Quote => $_[0] }, { Quote => $_[1] });
 }
 
 =item I<setmetadata($FolderName, $Name, $Value, $Name2, $Value2)>
@@ -1705,7 +1714,7 @@ Examples:
 sub setmetadata {
   my $Self = shift;
   $Self->_require_capability('metadata') || return undef;
-  return $Self->_imap_cmd("setmetadata", 0, "metadata", $Self->_fix_folder_name(+shift, 1), _quote_list([@_]));
+  return $Self->_imap_cmd("setmetadata", 0, "metadata", $Self->_fix_folder_name(+shift, 1), { Quote => [ @_ ] });
 }
 
 =item I<multigetannotation($Entry, $Attribute, @FolderNames)>
@@ -1723,7 +1732,7 @@ sub multigetannotation {
   # Send all commands at once
   my $FirstId = $Self->{CmdId};
   for (@FolderList) {
-    $Self->_send_cmd("getannotation", $Self->_fix_folder_name($_, 1), _quote_list($Entry, $Attribute));
+    $Self->_send_cmd("getannotation", $Self->_fix_folder_name($_, 1), { Quote => $Entry }, { Quote => $Attribute });
     $Self->{CmdId}++;
   }
 
@@ -2892,53 +2901,93 @@ actual command.
 
 =cut
 sub _send_cmd {
-  my ($Self, $Cmd, @Args) = @_;
+  my ($Self, $Cmd) = (shift, shift);
 
   # Send command. Build line buffer of args
   my $LineBuffer = $Self->{CmdId} . " " . $Cmd;
+  $LineBuffer = $Self->_send_data({}, $LineBuffer, @_);
+
+  # Output remainder of line buffer (if empty, we still want
+  #  to send the \015\012 chars)
+  $Self->_imap_socket_out($LineBuffer . LB);
+
+  return 1;
+}
+
+=item I<_send_data($Self, $Opts, $Buffer, @Args)>
+
+Helper method used by the B<_send_cmd> method to actually build (and
+quote where necessary) the command arguments and then send the
+actual command.
+
+=cut
+sub _send_data {
+  my ($Self, $Opts, $LineBuffer, @Args) = @_;
+
+  my ($AddSpace, $NextAddSpace) = (1, 1);
   foreach my $Arg (@Args) {
-    # Skip undef values
-    next if !defined $Arg;
-    my ($IsLiteral, $IsFile) = (0, 0);
+    my ($IsQuote, $IsLiteral, $IsFile) = ($Opts->{Quote}, 0, 0);
 
     # --- Determine value type and appropriate output
 
+    # Map undef to NIL atom
+    if (!defined($Arg)) {
+      $Arg = "NIL";
+
     # If it's a reference, then must be a file, scalar or hash ref
-    if (ref($Arg)) {
+    } elsif (ref($Arg)) {
 
-      # If it's a scalar ref, just use value it references
-      if (ref($Arg) eq "SCALAR") {
-
-      # If it's a hash ref, deal with
-      } elsif (ref($Arg) eq "HASH") {
+      # Hash refs are used to encode special handling of items
+      if (ref($Arg) eq "HASH") {
         if (exists $Arg->{Quote}) {
-          $Arg = _quote($Arg->{Quote});
+          $IsQuote = 1;
+          $Arg = $Arg->{Quote};
         } elsif (exists $Arg->{Literal}) {
-          $Arg = ref($Arg->{Literal}) ?  $Arg->{Literal} : \$Arg->{Literal};
           $IsLiteral = 1;
+          $Arg = ref($Arg->{Literal}) ?  $Arg->{Literal} : \$Arg->{Literal};
+        } elsif (exists $Arg->{Raw}) {
+          $AddSpace = !$Arg->{NoSpace};
+          $NextAddSpace = !$Arg->{NoNextSpace};
+          $IsQuote = 0;
+          $Arg = $Arg->{Raw};
         } else {
           die "Unknown hash arg type: " . (keys %$Arg)[0];
         }
+      }
 
-      # Must be a file ref
-      } elsif (UNIVERSAL::isa($Arg, "GLOB")) {
-        $IsLiteral = $IsFile = 1;
-      } else {
-        die "Unknown reference arg type: " . ref($Arg);
+      # Above may have changed $Arg, so not an elsif here
+
+      if (ref($Arg)) {
+        # Array reference, wrap in ()'s
+        if (ref($Arg) eq "ARRAY") {
+          $LineBuffer = $Self->_send_data({ Quote => $IsQuote }, $LineBuffer, { Raw => "(", NoNextSpace => 1 }, @$Arg, { Raw => ")", NoSpace => 1 });
+          next;
+
+        # If it's a scalar ref, just use value it references
+        } elsif (ref($Arg) eq "SCALAR") {
+
+        # If it's a hash ref, deal with
+        # Must be a file ref
+        } elsif (UNIVERSAL::isa($Arg, "GLOB")) {
+          $IsLiteral = $IsFile = 1;
+
+        } else {
+          die "Unknown reference arg type: " . ref($Arg);
+        }
       }
 
     # If it's got a \000 or \012 or \015, we need to make it a literal.
     } elsif ($Arg =~ m/[\000\012\015]/) {
-        $IsLiteral = 1;
+      $IsLiteral = 1;
 
     # If it's got other invalid chars, but doesn't start with a "(",
     # just quote it
     } elsif ($Arg =~ m/[\000-\040\{\} \%\*\"\(\)]/ && !($Arg =~ m/^\(/)) {
-      $Arg = _quote($Arg);
+      $IsQuote = 1;
 
     # Empty string, send empty quotes
-    } elsif ($Arg =~ m/^$/) {
-      $Arg = _quote("");
+    } elsif ($Arg eq "") {
+      $IsQuote = 1;
 
     # Otherwise leave as normal
     } else {
@@ -2948,9 +2997,10 @@ sub _send_cmd {
 
     # Handle non-literals
     if (!$IsLiteral) {
+      $Arg = _quote(ref($Arg) ? $$Arg : $Arg) if $IsQuote;
       
       # Must be a scalar reference for a non-literal
-      $LineBuffer .= (length($LineBuffer) ? " " : "") . (ref($Arg) ? $$Arg : $Arg);
+      $LineBuffer .= ($AddSpace ? " " : "") . (ref($Arg) ? $$Arg : $Arg);
 
     # It's a literal, has to be scalar, scalar ref or file ref
     } else {
@@ -2968,7 +3018,7 @@ sub _send_cmd {
       }
 
       # Add to line buffer and send
-      $LineBuffer .= " {" . $LiteralSize . "}" . LB;
+      $LineBuffer .= ($AddSpace ? " " : "") . "{" . $LiteralSize . "}" . LB;
       $Self->_imap_socket_out($LineBuffer);
 
       $LineBuffer = "";
@@ -2988,13 +3038,11 @@ sub _send_cmd {
       }
 
     }
+    $AddSpace = $NextAddSpace;
+    $NextAddSpace = 1;
   }
 
-  # Output remainder of line buffer (if empty, we still want
-  #  to send the \015\012 chars)
-  $Self->_imap_socket_out($LineBuffer . LB);
-
-  return 1;
+  return $LineBuffer;
 }
 
 =item I<_parse_response($Self, $RespItems)>
@@ -3110,7 +3158,7 @@ sub _parse_response {
       $Res1 eq 'parse' || $Res1 eq 'trycreate') {
       $DataResp{$Res1} = $Self->_remaining_line();
 
-    } elsif ($Res1 eq 'capability') {
+    } elsif ($Res1 eq 'capability' || $Res1 eq 'enabled') {
       $DataResp{$Res1} = { map { lc($_) => 1 } @{$Self->_remaining_atoms() || []} };
 
     } elsif ($Res1 eq 'vanished') {
@@ -3161,7 +3209,7 @@ sub _parse_response {
     } elsif (($Res1 eq 'bye') && ($Self->{LastCmd} ne 'logout')) {
       die "IMAPTalk: Connection was unexpectedly closed by host";
 
-    } elsif ($Res1 eq 'no') {
+    } elsif ($Res1 eq 'no' || $Res1 eq 'bad') {
       $Result = $Self->_remaining_line();
 
     } else {
@@ -3712,30 +3760,6 @@ sub _quote {
   return \qq{"$Str"};
 }
 
-=item I<_quote_list(@Items)>
-
-For each item in @Items:
-1. If it's a string, quote as "..."
-2. If it's an array ref, place in (...) and quote each item.
-
-Returns a list as long as @Items.
-
-=cut
-sub _quote_list {
-  my @Items = @_;
-  for (@Items) {
-    if (ref $_) {
-      $_ = '(' . join(' ', map { $$_ } _quote_list(@$_)) . ')';
-    } else {
-      # Replace " and \ with \" and \\ and surround with "..."
-      s/(["\\])/\\$1/g;
-      $_ = \qq{"$_"};
-    }
-  }
-
-  return @Items;
-}
-
 =back
 =cut
 
@@ -3780,6 +3804,8 @@ is left alone.
 =cut
 sub _fix_folder_name {
   my ($Self, $FolderName, $WildCard) = @_;
+
+  return '' if $FolderName eq '';
 
   if ( $Self->unicode_folders()
     && ( $FolderName =~ m{[^\x00-\x25\x27-\x7f]} ) )
