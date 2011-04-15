@@ -2933,6 +2933,7 @@ sub _send_data {
     # Map undef to NIL atom
     if (!defined($Arg)) {
       $Arg = "NIL";
+      $IsQuote = 0;
 
     # If it's a reference, then must be a file, scalar or hash ref
     } elsif (ref($Arg)) {
@@ -3151,7 +3152,7 @@ sub _parse_response {
 
     } elsif ($Res1 eq 'permanentflags' || $Res1 eq 'uidvalidity' ||
       $Res1 eq 'uidnext' || $Res1 eq 'highestmodseq' || $Res1 eq 'numresults') {
-      $DataResp{$Res1} = $Self->_remaining_atoms();
+      $DataResp{$Res1} = $Self->_next_atom();
       $Self->_remaining_line();
 
     } elsif ($Res1 eq 'alert' || $Res1 eq 'newname' ||
@@ -3225,7 +3226,8 @@ sub _parse_response {
 
   # Return the requested item from %DataResp, and put
   #  the rest in $Self->{Cache}
-  $Result ||= delete $DataResp{$RespItems} if !ref $RespItems;
+  my $RespItem = !ref($RespItems) ? $RespItems : $RespItems->{responseitem} || '';
+  $Result ||= delete $DataResp{$RespItem};
   $Result ||= $Res1;
   $Self->{Cache}->{$_} = $DataResp{$_} for keys %DataResp;
 
