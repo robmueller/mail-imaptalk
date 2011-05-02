@@ -2605,8 +2605,8 @@ Other bracketed (...) lists have become array references.
 
 =back
 
-In general, this is how all fetch responses are parsed when the C<parse_mode>
-is set to 0. There is one major difference however when the IMAP connection
+In general, this is how all fetch responses are parsed.
+There is one major difference however when the IMAP connection
 is in 'uid' mode. In this case, the message IDs in the main hash are changed
 to message UIDs, and the 'uid' entry in the inner hash is removed. So the
 above example would become:
@@ -2649,7 +2649,7 @@ As expected, the resultant response would look like this:
     }
   };
 
-However, if you set the C<parse_mode> state to 1, then the result would be:
+However, if you set the C<parse_mode(BodyStructure => 1)>, then the result would be:
 
   $Res = {
     '1' => {
@@ -2681,7 +2681,8 @@ A couple of points to note here:
 
 =item 1.
 
-All the fields have been turned into nicely named hash items.
+All the positional fields from the bodystructure list response
+have been turned into nicely named key/value hash items.
 
 =item 2.
 
@@ -2711,8 +2712,8 @@ In general, the following items are defined for all body structures:
 
 =back
 
-For all items EXCEPT those that have a MIME-Type of 'multipart', the
-following are defined:
+For all bodystructures EXCEPT those that have a MIME-Type of 'multipart',
+the following are defined:
 
 =over 4
 
@@ -2732,18 +2733,19 @@ following are defined:
 
 =back
 
-For items where MIME-Type is 'text', an extra field 'Lines' is defined.
+For bodystructures where MIME-Type is 'text', an extra item 'Lines'
+is defined.
 
-For items where MIME-Type is 'message' and MIME-Subtype is 'rfc822', the
-extra fields 'Message-Envelope', 'Message-Bodystructure' and 'Message-Lines'
-are defined. The 'Message-Bodystructure' field is itself a hash references
+For bodystructures where MIME-Type is 'message' and MIME-Subtype is 'rfc822', the
+extra items 'Message-Envelope', 'Message-Bodystructure' and 'Message-Lines'
+are defined. The 'Message-Bodystructure' item is itself a reference
 to an entire bodystructure hash with all the format information of the
-contained message. The 'Message-Envelope' field is a hash structure with
+contained message. The 'Message-Envelope' item is a hash structure with
 the message header information. See the B<Envelope> entry below.
 
-For items where MIME-Type is 'multipart', an extra field 'MIME-Subparts' is
-defined. The 'MIME-Subparts' field is an array reference, with each item being a
-hash reference to an entire bodystructure hash with all the format information
+For bodystructures where MIME-Type is 'multipart', an extra item 'MIME-Subparts' is
+defined. The 'MIME-Subparts' item is an array reference, with each item being a
+reference to an entire bodystructure hash with all the format information
 of each MIME sub-part.
 
 For further processing, you can use the B<find_message()> function.
@@ -2779,7 +2781,7 @@ The fetch command can be sent by calling:
   my $Res = $IMAP->fetch(1, 'envelope');
 
 And you get the idea of what the resultant response would be. Again
-if you change C<parse_mode> to 1, you get a neat structure as follows:
+if you change C<parse_mode(Envelope => 1)>, you get a neat structure as follows:
 
   $Res = {
     '1' => {
