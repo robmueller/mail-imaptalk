@@ -2851,6 +2851,9 @@ Between the sending of the command and the 'OK Completed' response,
 we have to pick up all the untagged 'FETCH' response items so we
 would pass 'fetch' (always use lower case) as the $RespItems to extract.
 
+This can also be a hash ref of callback functions. See _parse_response
+for more examples
+
 =item B<@Args>
 
 Any extra arguments to pass to command.
@@ -3066,6 +3069,22 @@ Helper method called by B<_imap_cmd> after sending the command. This
 methods retrieves data from the IMAP socket and parses it into Perl
 structures and returns the results.
 
+$RespItems is either a string, which is the untagged response(s)
+to find and return, or for custom processing, it can be a
+hash ref.
+
+If a hash ref, then each key will be an untagged response to look for,
+and each value a callback function to call for the corresponding untagged
+response.
+
+Each callback will be called with 2 or 3 arguments; the untagged
+response string, the remainder of the line parsed into an array ref, and
+for fetch type responses, the id will be passed as the third argument.
+
+One other piece of magic, if you pass a 'responseitem' key, then the
+value should be a string, and will be the untagged response returned
+from the function
+
 =cut
 sub _parse_response {
   my ($Self, $RespItems) = @_;
@@ -3108,7 +3127,7 @@ sub _parse_response {
       }
 
       if (ref($RespItems) && ($Callback = $RespItems->{$Res2})) {
-        $Callback->($Res2, $Fetch || $Res1);
+        $Callback->($Res2, $Fetch || $Res1, $Res1);
 
       } elsif ($Res2 eq 'exists' || $Res2 eq 'recent' || $Res2 eq 'expunge') {
         $DataResp{$Res2} = $Res1;
