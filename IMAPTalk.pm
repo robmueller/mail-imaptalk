@@ -944,7 +944,7 @@ sub get_last_error {
 
 Returns the last completion response to the tagged command.
 
-This is OK, NO or BAD
+This is either the string "ok", "no" or "bad" (always lower case) 
 
 =cut
 sub get_last_completion_response {
