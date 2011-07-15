@@ -372,6 +372,13 @@ $| ($AUTOFLUSH) variable as shown below.
 
   my $ofh = select($Socket); $| = 1; select ($ofh);
 
+=item B<UseBlocking>
+
+For historical reasons, when reading from a socket, the module
+sets the socket to non-blocking and does a select(). If you're
+using an SSL socket that doesn't work, so you have to set
+UseBlocking to true to use blocking reads instead.
+
 =item B<State>
 
 If you supply a C<Socket> option, you can specify the IMAP state the
@@ -4328,6 +4335,10 @@ Latest news/details can also be found at:
 
 http://cpan.robm.fastmail.fm/mailimaptalk/
 
+Available on github at:
+
+L<https://github.com/robmueller/mail-imaptalk/>
+
 =cut
 
 =head1 AUTHOR
@@ -4340,7 +4351,7 @@ documentation setup.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2003-2005 by FastMail IP Partners
+Copyright (C) 2003-2011 by Opera Software Australia Pty Ltd
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
