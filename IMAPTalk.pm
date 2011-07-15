@@ -113,7 +113,7 @@ sub import {
   goto &Exporter::import;
 }
 
-our $VERSION = '1.04';
+our $VERSION = '2.01';
 # }}}
 
 # Use modules {{{
