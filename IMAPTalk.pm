@@ -276,7 +276,7 @@ Examples:
 =head1 CONSTANTS
 
 These constants relate to the standard 4 states that an IMAP connection can
-be in. They are passed and returned from the C<state()> method. See RFC2060
+be in. They are passed and returned from the C<state()> method. See RFC 3501
 for more details about IMAP connection states.
 
 =over 4
@@ -1335,7 +1335,7 @@ sub check {
 =item I<setacl($FolderName, $User, $Rights)>
 
 Perform the IMAP 'setacl' command to set the access control list
-details of a folder/mailbox. See RFC2086 for more details on the IMAP
+details of a folder/mailbox. See RFC 4314 for more details on the IMAP
 ACL extension. $User is the user name to set the access
 rights for. $Rights is either a list of absolute rights to set, or a
 list prefixed by a - to remove those rights, or a + to add those rights.
@@ -1354,11 +1354,28 @@ list prefixed by a - to remove those rights, or a + to add those rights.
 
 =item p - post (send mail to submission address for mailbox, not enforced by IMAP4 itself)
 
+=item k - create mailboxes (CREATE new sub-mailboxes in any implementation-defined hierarchy, parent mailbox for the new mailbox name in RENAME)
+
+=item x - delete mailbox (DELETE mailbox, old mailbox name in RENAME)
+
+=item t - delete messages (set or clear \DELETED flag via STORE, set \DELETED flag during APPEND/COPY)
+
+=item e - perform EXPUNGE and expunge as a part of CLOSE
+
+=item a - administer (perform SETACL)
+
+=back
+
+Due to ambiguity in RFC 2086, some existing RFC 2086 server
+implementations use the "c" right to control the DELETE command.
+Others chose to use the "d" right to control the DELETE command. See
+the 2.1.1. Obsolete Rights in RFC 4314 for more details.
+
+=over 4
+
 =item c - create (CREATE new sub-mailboxes in any implementation-defined hierarchy)
 
 =item d - delete (STORE DELETED flag, perform EXPUNGE)
-
-=item a - administer (perform SETACL)
 
 =back
 
@@ -1397,7 +1414,7 @@ sub setacl {
 =item I<getacl($FolderName)>
 
 Perform the IMAP 'getacl' command to get the access control list
-details of a folder/mailbox. See RFC2086 for more details on the IMAP
+details of a folder/mailbox. See RFC 4314 for more details on the IMAP
 ACL extension. Returns an array of pairs. Each pair is
 a username followed by the access rights for that user. See B<setacl>
 for more information on access rights.
@@ -1462,7 +1479,7 @@ sub deleteacl {
 =item I<setquota($FolderName, $QuotaDetails)>
 
 Perform the IMAP 'setquota' command to set the usage quota
-details of a folder/mailbox. See RFC2087 for details of the IMAP
+details of a folder/mailbox. See RFC 2087 for details of the IMAP
 quota extension. $QuotaDetails is a bracketed list of limit item/value
 pairs which represent a particular type of limit and the value to set
 it to. Current limits are:
@@ -1493,7 +1510,7 @@ sub setquota {
 =item I<getquota($FolderName)>
 
 Perform the standard IMAP 'getquota' command to get the quota
-details of a folder/mailbox. See RFC2087 for details of the IMAP
+details of a folder/mailbox. See RFC 2087 for details of the IMAP
 quota extension. Returns an array reference to quota limit triplets.
 Each triplet is made of: limit item, current value, maximum value.
 
@@ -1523,7 +1540,7 @@ sub getquota {
 
 Perform the IMAP 'getquotaroot' command to get the quota
 details of a folder/mailbox and possible root quota as well.
-See RFC2087 for details of the IMAP
+See RFC 2087 for details of the IMAP
 quota extension. The result of this command is a little complex.
 Unfortunately it doesn't map really easily into any structure
 since there are several different responses. 
@@ -1666,7 +1683,7 @@ sub getannotation {
 =item I<getmetadata($FolderName, [ \%Options ], @Entries)>
 
 Perform the IMAP 'getmetadata' command to get the metadata items
-for a mailbox.  See RFC5464 for details.
+for a mailbox.  See RFC 5464 for details.
 
 If $Options is passed, it is a hashref of options to set.
 
@@ -1865,7 +1882,7 @@ C<$MessageItems> can be one of, or a bracketed list of:
 
 =back
 
-It would be a good idea to see RFC2060 for what all these means.
+It would be a good idea to see RFC 3501 for what all these means.
 
 Examples:
 
@@ -1929,7 +1946,7 @@ Perform standard IMAP append command to append a new message into a folder.
 
 The $MessageData to append can either be a Perl scalar containing the data,
 or a file handle to read the data from. In each case, the data must be in
-proper RFC822 format with \r\n line terminators.
+proper RFC 822 format with \r\n line terminators.
 
 Any optional fields not needed should be removed, not left blank.
 
@@ -2022,8 +2039,8 @@ sub uidexpunge {
 Perform extension IMAP sort command. The result is an array reference to a list
 of message IDs (or UIDs if in Uid mode) in sorted order.
 
-It would probably be a good idea to look at the sort extension details at
-somewhere like : http://www.imap.org/papers/docs/sort-ext.html.
+It would probably be a good idea to look at the sort RFC 5256 details at
+somewhere like : http://www.ietf.org/rfc/rfc5256.txt
 
 Examples:
 
@@ -2818,7 +2835,7 @@ if you change C<parse_mode(Envelope => 1)>, you get a neat structure as follows:
   };
 
 All the fields here are from straight from the email headers.
-See RFC822 for more details.
+See RFC 822 for more details.
 
 =cut
 
@@ -3976,7 +3993,7 @@ sub _fix_message_ids {
 =item I<_parse_email_address($EmailAddressList)>
 
 Converts a list of IMAP email address structures as parsed and returned
-from an IMAP fetch (envelope) call into a single RFC822 email string
+from an IMAP fetch (envelope) call into a single RFC 822 email string
 (e.g. "Person 1 Name" <ename@ecorp.com>, "Person 2 Name" <...>, etc) to
 finally return to the user.
 
@@ -4329,7 +4346,7 @@ sub DESTROY {
 
 =head1 SEE ALSO
 
-I<Net::IMAP>, I<Mail::IMAPClient>, I<IMAP::Admin>, RFC2060
+I<Net::IMAP>, I<Mail::IMAPClient>, I<IMAP::Admin>, RFC 3501
 
 Latest news/details can also be found at:
 
