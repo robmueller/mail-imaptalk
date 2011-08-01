@@ -3216,9 +3216,13 @@ sub _parse_response {
       $DataResp{$Res1} = $Self->_next_atom();
       $Self->_remaining_line();
 
-    } elsif ($Res1 eq 'alert' || $Res1 eq 'newname' ||
+    } elsif ($Res1 eq 'newname' ||
       $Res1 eq 'parse' || $Res1 eq 'trycreate') {
       $DataResp{$Res1} = $Self->_remaining_line();
+
+    } elsif ($Res1 eq 'alert') {
+      # No argument to alert, it's the remainder of the line after the ]
+      $DataResp{$Res1} = delete $DataResp{remainder};
 
     } elsif ($Res1 eq 'capability' || $Res1 eq 'enabled') {
       $DataResp{$Res1} = { map { lc($_) => 1 } @{$Self->_remaining_atoms() || []} };
