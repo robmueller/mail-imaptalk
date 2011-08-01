@@ -992,16 +992,20 @@ Number of messages that are recent in the folder.
 =back
 
 Other possible responses are B<alert>, B<newname>, B<parse>,
-B<trycreate>, B<appenduid>.
+B<trycreate>, B<appenduid>, etc.
+
+The values are stored in a hash keyed on the $Response item.
+They're kept until either overwritten by a future response,
+or explicitly cleared via clear_response_code().
 
 Examples:
 
   # Select inbox and get list of permanent flags, uidnext and number
   #  of message in the folder
   $IMAP->select('inbox');
-  my $NMessages = $IMAP->get_sub_result('exists');
-  my $PermanentFlags = $IMAP->get_sub_result('permanentflags');
-  my $UidNext = $IMAP->get_sub_result('uidnext');
+  my $NMessages = $IMAP->get_response_code('exists');
+  my $PermanentFlags = $IMAP->get_response_code('permanentflags');
+  my $UidNext = $IMAP->get_response_code('uidnext');
 
 =cut
 sub get_response_code {
@@ -1009,7 +1013,7 @@ sub get_response_code {
   return $Self->{Cache}->{$Response};
 }
 
-=item I<clear_reponse_code($Response)>
+=item I<clear_response_code($Response)>
 
 Clears any response code information. Response code information
 is not normally cleared between calls.
