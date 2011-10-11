@@ -324,7 +324,7 @@ my $NeedDecodeUTF8Regexp = qr/=\?$RFC1522Token\?$RFC1522Token\?[^\?]*\?=/;
 my %UntaggedResponses = map { $_ => 1 } qw(exists expunge recent);
 
 # Default responses
-my %RespDefaults = ('annotation' => 'hash', 'metadata' => 'hash', 'fetch' => 'hash', 'list' => 'array', 'lsub' => 'array');
+my %RespDefaults = ('annotation' => 'hash', 'metadata' => 'hash', 'fetch' => 'hash', 'list' => 'array', 'lsub' => 'array', 'sort' => 'array', 'search' => 'array');
 
 # }}}
 
