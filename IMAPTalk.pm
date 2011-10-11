@@ -315,8 +315,9 @@ use constant Selected => 3;
 use constant LB => "\015\012";
 use constant LBLEN => length(LB);
 
-# Regexps used to determine if header is MIME encoded
-my $RFC1522Token = qr/[^\x00-\x1f\(\)\<\>\@\,\;\:\"\/\[\]\?\.\=\ ]+/;
+# Regexps used to determine if header is MIME encoded (we remove . from
+#  especials because of dumb ANSI_X3.4-1968 encoding)
+my $RFC1522Token = qr/[^\x00-\x1f\(\)\<\>\@\,\;\:\"\/\[\]\?\=\ ]+/;
 my $NeedDecodeUTF8Regexp = qr/=\?$RFC1522Token\?$RFC1522Token\?[^\?]*\?=/;
 
 # Known untagged responses
@@ -4279,6 +4280,10 @@ Decodes the passed quoted printable value to a Perl UTF8 string.
 
 =cut
 sub _decode_utf8 {
+  # Fix dumb, dumb ANSI_X3.4-1968 encoding. It's not actually a valid
+  #  charset according to RFC2047, "." is an especial, so Encode ignores it
+  # See http://en.wikipedia.org/wiki/ASCII for other aliases
+  $_[0] =~ s/=\?ANSI_X3\.4-(?:1968|1986)\?/=?US-ASCII?/gi;
   eval { $_[0] = decode('MIME-Header', $_[0]); };
 }
 
