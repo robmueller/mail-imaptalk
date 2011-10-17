@@ -528,6 +528,7 @@ sub new {
   $Self->{Select}->add($Socket);
   $Self->{LocalFD} = fileno($Socket);
   $Self->{UseBlocking} = $Args{UseBlocking};
+  $Self->{Pedantic} = $Args{Pedantic};
 
   # Process greeting
   if ($Args{Server} || $Args{ExpectGreeting}) {
@@ -3120,7 +3121,7 @@ sub _parse_response {
 
   # Loop until we get the tagged response for the sent command
   my $Result;
-  my $Tag = '';
+  my $Tag = '*';
   my (%DataResp, $CompletionResp, $Res1, $Callback);
 
   # Some commands might have no results (eg list, fetch, etc), but we
@@ -3134,6 +3135,10 @@ sub _parse_response {
 
   # Store completion response and data responses
   while ($Tag ne $Self->{CmdId}) {
+    if ($Tag ne '*' && $Self->{Pedantic}) {
+      die "Unexpected tag '$Tag', remaining line: " . $Self->_remaining_line();
+    }
+
     # Force starting new line read
     $Self->{ReadLine} = undef;
 
