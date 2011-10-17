@@ -3121,7 +3121,7 @@ sub _parse_response {
 
   # Loop until we get the tagged response for the sent command
   my $Result;
-  my $Tag = '*';
+  my $Tag = '';
   my (%DataResp, $CompletionResp, $Res1, $Callback);
 
   # Some commands might have no results (eg list, fetch, etc), but we
@@ -3135,7 +3135,7 @@ sub _parse_response {
 
   # Store completion response and data responses
   while ($Tag ne $Self->{CmdId}) {
-    if ($Tag ne '*' && $Self->{Pedantic}) {
+    if ($Tag && $Tag ne '*' && $Self->{Pedantic}) {
       die "Unexpected tag '$Tag', remaining line: " . $Self->_remaining_line();
     }
 
