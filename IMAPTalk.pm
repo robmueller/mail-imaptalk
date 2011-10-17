@@ -2909,14 +2909,14 @@ sub _imap_cmd {
     # Items returned are the complete response (eg ok/bad/no) and
     #  the any parsed data to return from the command
     ($CompletionResp, $DataResp) = $Self->_parse_response($RespItems);
-    $Self->{CmdId}++;
   };
+  $Self->{CmdId}++;
   $Self->{LastRespCode} = $CompletionResp;
 
   # Return undef if any error occurred (either through 'die' or non-'OK' IMAP response)
   if ($@) {
     warn($@) if $@ !~ /NO Over quota/;
-    if ($@ =~ /IMAPTalk/) {
+    if ($@ =~ /IMAPTalk/ && !$Self->{Pedantic}) {
       $Self->{LastError} = $@ = "IMAP Command : '$Cmd' failed. Reason was : $@";
       return undef;
     }
@@ -3136,7 +3136,7 @@ sub _parse_response {
   # Store completion response and data responses
   while ($Tag ne $Self->{CmdId}) {
     if ($Tag && $Tag ne '*' && $Self->{Pedantic}) {
-      die "Unexpected tag '$Tag', remaining line: " . $Self->_remaining_line();
+      die "IMAPTalk: Unexpected tag '$Tag'";
     }
 
     # Force starting new line read
