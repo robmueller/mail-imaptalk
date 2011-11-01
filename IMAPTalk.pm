@@ -3418,7 +3418,8 @@ sub _next_atom {
   do {
 
     # Single item? (and any trailing space)
-    if ($Line =~ m/\G([^()\"{}\s]+)(?: |\z|(?=\)))/gc) {
+    # (make it trailing spaces, due to buggy XIMAPPROXY)
+    if ($Line =~ m/\G([^()\"{}\s]+)(?: +|\z|(?=\)))/gc) {
       # Add to current atom. If there's a stack, must be within a bracket
       if (scalar @AtomStack) {
         push @$AtomRef, $1 eq 'NIL' ? undef : $1;
