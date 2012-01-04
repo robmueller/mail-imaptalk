@@ -1,4 +1,3 @@
-#!/usr/bin/perl -w
 package Mail::IMAPTalk;
 
 =head1 NAME
@@ -130,6 +129,7 @@ use Data::Dumper;
 eval 'use Time::HiRes qw(time);';
 
 use strict;
+use warnings;
 # }}}
 
 =head1 CLASS OVERVIEW
@@ -230,7 +230,7 @@ specified in several ways:
 The value is first checked and quoted if required. Values containing
 [\000\012\015] are turned into literals, values containing
 [\000-\040\{\} \%\*\"] are quoted by surrounding with a "..." pair
-(any " themselves are turned into \").
+(any " themselves are turned into \"). undef is turned into NIL
 
 =item B<file ref>
 
@@ -246,6 +246,13 @@ The string/data in the referenced item should be sent as is, no quoting will
 occur, and the data won't be sent as quoted or as a literal regardless
 of the contents of the string/data.
 
+=item B<array ref>
+
+Emits an opening bracket, and then each item in the array separated
+by a space, and finally a closing braket. Each item in the array
+is processed by the same methods, so can be a scalar, file ref,
+scalar ref, another array ref, etc.
+
 =item B<hash ref>
 
 The hash reference should contain only 1 item. The key is a text
@@ -255,8 +262,15 @@ string which specifies what to do with the value item of the hash.
 
 =item * 'Literal'
 
-The string/data in the second item should be sent as an IMAP literal
-regardless of the actually data in the string/data.
+The string/data in the value is sent as an IMAP literal
+regardless of the actual data in the string/data.
+
+=item * 'Quote'
+
+The string/data in the value is sent as an IMAP quoted string
+regardless of the actual data in the string/data.
+
+=back
 
 Examples:
 
@@ -266,8 +280,6 @@ Examples:
     $IMAP->append("inbox", { Literal => $MsgTxt })
     # Append MSGFILE contents as new message
     $IMAP->append("inbox", \*MSGFILE ])
-
-=back
 
 =back
 
@@ -1615,8 +1627,7 @@ Examples:
 =cut
 sub status {
   my $Self = shift;
-  my $Msgs = ($Self->_imap_cmd("status", 0, "status", $Self->_fix_folder_name(+shift), +shift)) || return undef;
-  return _parse_list_to_hash($Msgs->[1]);
+  return $Self->_imap_cmd("status", 0, "status", $Self->_fix_folder_name(+shift), +shift);
 }
 
 =item I<multistatus($StatusList, @FolderNames)>
@@ -1633,8 +1644,10 @@ sub multistatus {
   # Send all commands at once
   my $CmdBuf = "";
   my $FirstId = $Self->{CmdId};
+  $Items = ref($Items) ? $Self->_send_data({}, "", $Items) : " " . $Items;
+
   for (@FolderList) {
-    $CmdBuf .= $Self->{CmdId}++ . " status " . ${_quote($Self->_fix_folder_name($_))} . " " . $Items . LB;
+    $CmdBuf .= $Self->{CmdId}++ . " status " . ${_quote($Self->_fix_folder_name($_))} . $Items . LB;
   }
   $Self->_imap_socket_out($CmdBuf);
 
@@ -1643,7 +1656,7 @@ sub multistatus {
   $Self->{CmdId} = $FirstId;
   for (@FolderList) {
     my ($CompletionResp, $DataResp) = $Self->_parse_response("status");
-    $Resp{$_} = ref($DataResp) ? _parse_list_to_hash($DataResp->[1]) : $CompletionResp;
+    $Resp{$_} = ref($DataResp) ? $DataResp : $CompletionResp;
     $Self->{CmdId}++;
   }
 
@@ -2428,7 +2441,7 @@ sub generate_cid {
 
   my $Digester = Digest->new( 'MD5' );
   $Digester->add( $_[0] );
-  $Digester->add( $_[1]->{'IMAP-Partnum'} );
+  $Digester->add( $_[1]->{'IMAP-Partnum'} // '' );
   $Digester->add( $_[1]->{'Size'} || 'none' );
   $Digester->add( $_[1]->{'MIME-TxtType'} || 'none' );
   my $Cid = 'Generated-' . $Digester->b64digest() . '@messagingengine.com';
@@ -3122,7 +3135,7 @@ sub _parse_response {
   # Loop until we get the tagged response for the sent command
   my $Result;
   my $Tag = '';
-  my (%DataResp, $CompletionResp, $Res1, $Callback);
+  my (%DataResp, $CompletionResp, $Res1, $Callback, %UnfixCache);
 
   # Some commands might have no results (eg list, fetch, etc), but we
   #  want to distinguish no results vs IMAP NO result, so setup a default
@@ -3132,6 +3145,9 @@ sub _parse_response {
     $DataResp{$RespItems} = {} if $RespDefault eq 'hash';
     $DataResp{$RespItems} = [] if $RespDefault eq 'array';
   }
+
+  # Response item we'll return
+  my $RespItem = !ref($RespItems) ? $RespItems : $RespItems->{responseitem} || '';
 
   # Store completion response and data responses
   while ($Tag ne $Self->{CmdId}) {
@@ -3205,16 +3221,29 @@ sub _parse_response {
         # Avoid data copy if possible, could be large UID list
         $DataResp{$Res1} = $IdList;
       }
+    } elsif ($Res1 eq 'status') {
+      my ($Name, $StatusRes) = @{$Self->_remaining_atoms()};
+      $StatusRes = _parse_list_to_hash($StatusRes);
 
-    } elsif ($Res1 eq 'flags' || $Res1 eq 'status' ||
-             $Res1 eq 'thread' || $Res1 eq 'namespace') {
+      # If we explicit requested parsing the status response, we just want
+      #  the data (we know the folder). Otherwise this is an unsolicited
+      #  status response (eg list extended return status), and we want
+      #  to store the folder so we can get it via get_response_code.
+      if ($RespItem eq 'status') {
+        $DataResp{$Res1} = $StatusRes;
+      } else {
+        $Name = ($UnfixCache{$Name} ||= $Self->_unfix_folder_name($Name));
+        $DataResp{$Res1}->{$Name} = $StatusRes;
+      }
+
+    } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace') {
       $DataResp{$Res1} = $Self->_remaining_atoms();
 
     } elsif ($Res1 eq 'list' || $Res1 eq 'lsub') {
       my ($Attr, $Sep, $Name) = @{$Self->_remaining_atoms()};
       $Self->_set_separator($Sep);
       # Remove root text from folder name
-      $Name = $Self->_unfix_folder_name($Name);
+      $Name = ($UnfixCache{$Name} ||= $Self->_unfix_folder_name($Name));
       push @{$DataResp{$Res1}}, [ $Attr, $Sep, $Name ];
 
     } elsif ($Res1 eq 'permanentflags' || $Res1 eq 'uidvalidity' ||
@@ -3270,12 +3299,12 @@ sub _parse_response {
 
     } elsif ($Res1 eq 'annotation') {
       my ($Name, $Entry, $Attributes) = @{$Self->_remaining_atoms()};
-      $Name = $Self->_unfix_folder_name($Name);
+      $Name = ($UnfixCache{$Name} ||= $Self->_unfix_folder_name($Name));
       $DataResp{annotation}->{$Name}->{$Entry} = { @{$Attributes || []} };
 
     } elsif ($Res1 eq 'metadata') {
       my ($Name, $Bits) = @{$Self->_remaining_atoms()};
-      $Name = $Self->_unfix_folder_name($Name);
+      $Name = ($UnfixCache{$Name} ||= $Self->_unfix_folder_name($Name));
       $DataResp{metadata}->{$Name}->{$Bits->[0]} = $Bits->[1];
 
     } elsif (($Res1 eq 'bye') && ($Self->{LastCmd} ne 'logout')) {
@@ -3297,7 +3326,6 @@ sub _parse_response {
 
   # Return the requested item from %DataResp, and put
   #  the rest in $Self->{Cache}
-  my $RespItem = !ref($RespItems) ? $RespItems : $RespItems->{responseitem} || '';
   $Result ||= delete $DataResp{$RespItem};
   $Result ||= $Res1;
   $Self->{Cache}->{$_} = $DataResp{$_} for keys %DataResp;
@@ -3925,13 +3953,13 @@ sub _unfix_folder_name {
   my $UFM = $Self->{UnrootFolderMatch};
   $FolderName =~ s/^$UFM// if $UFM;
 
-  if ( $Self->unicode_folders()
-    && ( $FolderName =~ m{&} ) )
+  my $UnicodeFolders = $Self->unicode_folders();
+  if ( $UnicodeFolders && ( $FolderName =~ m{&} ) )
   {
     $FolderName = Encode::decode( 'IMAP-UTF-7', $FolderName );
-  } 
-  
-  if (! $Self->unicode_folders() ) {
+  }
+
+  if (! $UnicodeFolders ) {
     warn("Please report to rjlov");
     Carp::cluck("Warning only: IMAPTalk not using unicode_folders");
     warn("Please report to rjlov");
@@ -4207,6 +4235,24 @@ sub _parse_bodystructure {
   return \%Res;
 }
 
+=item I<_parse_fetch_annotation($AnnotateItem)>
+
+Takes the result from a single IMAP annotation item
+into a Perl friendly structure. 
+
+See the documentation section 'FETCH RESULTS' from more information.
+
+=cut
+sub _parse_fetch_annotation {
+  my ($Value) = @_;
+
+  return $Value unless ref($Value) eq 'ARRAY';
+  my %Result = @$Value;
+  map { $_ = { @$_ } if ref($_) eq 'ARRAY' } values %Result;
+
+  return \%Result;
+}
+
 =item I<_parse_fetch_result($FetchResult)>
 
 Takes the result from a single IMAP fetch response line and parses it
@@ -4241,6 +4287,8 @@ sub _parse_fetch_result {
       if ($BodyArgs =~ /^[\d.]*header/) {
         _parse_header_result($ResultHash{headers} ||= {}, $Value, $FetchResult);
       }
+    } elsif ($Type eq 'annotation') {
+      $Value = _parse_fetch_annotation($Value);
     }
 
     # Store result (either modified or original) into hash
