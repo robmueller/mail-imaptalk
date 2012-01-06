@@ -2441,7 +2441,7 @@ sub generate_cid {
 
   my $Digester = Digest->new( 'MD5' );
   $Digester->add( $_[0] );
-  $Digester->add( $_[1]->{'IMAP-Partnum'} // '' );
+  $Digester->add( $_[1]->{'IMAP-Partnum'} || '' );
   $Digester->add( $_[1]->{'Size'} || 'none' );
   $Digester->add( $_[1]->{'MIME-TxtType'} || 'none' );
   my $Cid = 'Generated-' . $Digester->b64digest() . '@messagingengine.com';
