@@ -118,7 +118,6 @@ our $VERSION = '2.01';
 # Use modules {{{
 use Fcntl qw(:DEFAULT);
 use Socket;
-use Carp;
 use IO::Select;
 use IO::Handle;
 use IO::Socket;
@@ -249,7 +248,7 @@ of the contents of the string/data.
 =item B<array ref>
 
 Emits an opening bracket, and then each item in the array separated
-by a space, and finally a closing braket. Each item in the array
+by a space, and finally a closing bracket. Each item in the array
 is processed by the same methods, so can be a scalar, file ref,
 scalar ref, another array ref, etc.
 
