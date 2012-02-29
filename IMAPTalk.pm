@@ -2349,13 +2349,12 @@ sub find_message {
 
   my %KnownTextParts = map { $_ => 1 } qw(plain html text enriched);
 
-  my @PartList = ([ undef, $_[0], 0, '' ]);
+  my @PartList = ([ undef, $_[0], 0, '', \(my $Tmp = '') ]);
 
   # Repeat until we find something
   while (my $Part = shift @PartList) {
-    my ($Parent, $BS, $Pos, $InMultiList) = @$Part;
+    my ($Parent, $BS, $Pos, $InMultiList, $MultiTypeRef) = @$Part;
 
-    my $AltType = '';
     my $InsideAlt = $InMultiList =~ /\balternative\b/ ? 1 : 0;
 
     # Pull out common MIME fields we'll look at
@@ -2403,11 +2402,11 @@ sub find_message {
         #  or best part type if we are
         if ($UT eq 'text' || !$InsideAlt) {
           push @{$MsgComponents{'textlist'}}, $BS;
-          $AltType = $UT if $InsideAlt;
+          $$MultiTypeRef ||= $UT;
         }
         if ($UT eq 'html' || !$InsideAlt) {
           push @{$MsgComponents{'htmllist'}}, $BS;
-          $AltType = $UT if $InsideAlt;
+          $$MultiTypeRef ||= $UT;
         }
 
         # Ok got a known part, move to next
@@ -2421,8 +2420,12 @@ sub find_message {
       if (!exists $CD->{attachment}) {
         # In alternative parts, we store which list part
         #  we're in in $InsideAlt
-        my $ItemList = $MsgComponents{$AltType . 'list'};
-        push @$ItemList, $BS if $ItemList;
+        my $ItemList = $MsgComponents{$$MultiTypeRef . 'list'};
+        if ($ItemList) {
+          push @$ItemList, $BS;
+          # Mark this list as having an image
+          $MsgComponents{$$MultiTypeRef . 'listimage'} = 1;
+        }
       }
       # And always add the image as an attachment below
 
@@ -2431,17 +2434,18 @@ sub find_message {
 
       # Look at all sub-parts
       my $Pos = 0;
+      my $MultiType = '';
+      my $SubMultiList = join ",", ($InMultiList or ()), $ST;
+      my @SubParts = map { [ $BS, $_, $Pos++, $SubMultiList, \$MultiType ] } @$SP;
 
       # If it's a signed/alternative/related sub-part, look in it FIRST
       if ($ST eq 'signed' || $ST eq 'alternative' || $ST eq 'related' || $CD->{inline}) {
-        my $SubMultiList = join ",", ($InMultiList or ()), $ST;
-        unshift @PartList, map { [ $BS, $_, $Pos++, $SubMultiList ] } @$SP;
+        unshift @PartList, @SubParts;
 
       # Otherwise look in it after we've looked at all the other components
       #  at the current level
       } else {
-        my $SubMultiList = join ",", ($InMultiList or ()), $ST;
-        push @PartList, map { [ $BS, $_, $Pos++, $SubMultiList ] } @$SP;
+        push @PartList, @SubParts;
       }
 
       # No attachment, move on to next part
@@ -2456,7 +2460,7 @@ sub find_message {
         msg => 1
       ) : (
         text => 1,
-        html => $MT eq 'images' && $InMultiList =~ /\brelated\b/ ? 0 : 1,
+        html => $MT eq 'image' && $InMultiList =~ /\brelated\b/ ? 0 : 1,
       )
     };
   }
