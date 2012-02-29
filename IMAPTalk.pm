@@ -554,7 +554,7 @@ sub new {
 
   # Set base modes
   $Self->uid($Args{Uid});
-  $Self->parse_mode(Envelope => 1, BodyStructure => 1);
+  $Self->parse_mode(Envelope => 1, BodyStructure => 1, Annotation => 1);
   $Self->set_tracing(0);
   $Self->{CurrentFolder} = '';
   $Self->{CurrentFolderMode} = '';
@@ -1054,6 +1054,11 @@ See the B<FETCH RESULTS> section.
 =item I<Envelope>
 
 Parse envelopes into more Perl-friendly structure
+See the B<FETCH RESULTS> section.
+
+=item I<Annotation>
+
+Parse annotation (from RFC 5257) into more Perl-friendly structure
 See the B<FETCH RESULTS> section.
 
 =item I<EnvelopeRaw>
@@ -1823,10 +1828,14 @@ sub close {
 =over 4
 =cut
 
-=item I<fetch($MessageIds, $MessageItems)>
+=item I<fetch([ \%ParseMode ], $MessageIds, $MessageItems)>
 
 Perform the standard IMAP 'fetch' command to retrieve the specified message
 items from the specified message IDs.
+
+The first parameter can be an optional hash reference that overrides
+particular parse mode parameters just for this fetch. See C<parse_mode>
+for possible keys.
 
 C<$MessageIds> can be one of two forms:
 
@@ -1924,12 +1933,14 @@ easier to handle as an error condition.
 sub fetch {
   my $Self = shift;
 
+  my $ParseMode = ref($_[0]) eq 'HASH' ? shift : {};
+
   # Are we fetching one uid
   my $FetchOne = !ref($_[0]) && $_[0] =~ /^\d+$/ && $_[0];
 
   # Clear any existing fetch responses and call the fetch command
   $Self->{Responses}->{fetch} = undef;
-  my $FetchRes = $Self->_imap_cmd("fetch", 1, "fetch", _fix_message_ids(+shift), @_);
+  my $FetchRes = $Self->_imap_cmd($ParseMode, "fetch", 1, "fetch", _fix_message_ids(+shift), @_);
 
   # Single message fetch with no data returns
   my $NoFetchData = ref($FetchRes) && !%$FetchRes;
@@ -2856,6 +2867,45 @@ if you change C<parse_mode(Envelope => 1)>, you get a neat structure as follows:
 All the fields here are from straight from the email headers.
 See RFC 822 for more details.
 
+=head2 Annotation
+
+If the server supports RFC 5257 (ANNOTATE Extension), then you can
+fetch per-message annotations.
+
+Annotation responses would normally be returned as a a nested set of
+arrays. However it's much easier to access the results as a nested set
+of hashes, so the results are so converted if the Annotation parse
+mode is enabled, which is on by default.
+
+Part of an example from the RFC
+
+   S: * 12 FETCH (UID 1123 ANNOTATION
+      (/comment (value.priv "My comment"
+         size.priv "10")
+      /altsubject (value.priv "Rhinoceroses!"
+         size.priv "13")
+
+So the fetch command:
+
+  my $Res = $IMAP->fetch(1123, 'annotation', [ '/*', [ 'value.priv', 'size.priv' ] ]);
+
+Would have the result:
+
+  $Res = {
+    '1123' => {
+      'annotation' => {
+        '/comment' => {
+          'value.priv' => 'My comment',
+          'size.priv => 10
+        },
+        '/altsubject' => {
+          'value.priv' => '"Rhinoceroses',
+          'size.priv => 13
+        }
+      }
+    }
+  }
+         
 =cut
 
 =head1 INTERNAL METHODS
@@ -2905,7 +2955,9 @@ Any extra arguments to pass to command.
 
 =cut
 sub _imap_cmd {
-  my ($Self, $Cmd, $IsUidCmd, $RespItems, @Args) = @_;
+  my $Self = shift;
+  my $ParseMode = ref($_[0]) eq 'HASH' ? shift : {};
+  my ($Cmd, $IsUidCmd, $RespItems) = (shift, shift, shift);
 
   # Remember the last command and reset last error
   $Self->{LastCmd} = $Cmd;
@@ -2918,10 +2970,10 @@ sub _imap_cmd {
   my ($CompletionResp, $DataResp);
   eval {
     # Send the command and parse the response
-    $Self->_send_cmd($Cmd, @Args);
+    $Self->_send_cmd($Cmd, @_);
     # Items returned are the complete response (eg ok/bad/no) and
     #  the any parsed data to return from the command
-    ($CompletionResp, $DataResp) = $Self->_parse_response($RespItems);
+    ($CompletionResp, $DataResp) = $Self->_parse_response($RespItems, $ParseMode);
   };
   $Self->{CmdId}++;
   $Self->{LastRespCode} = $CompletionResp;
@@ -3106,7 +3158,7 @@ sub _send_data {
   return $LineBuffer;
 }
 
-=item I<_parse_response($Self, $RespItems)>
+=item I<_parse_response($Self, $RespItems, [ \%ParseMode ])>
 
 Helper method called by B<_imap_cmd> after sending the command. This
 methods retrieves data from the IMAP socket and parses it into Perl
@@ -3130,12 +3182,15 @@ from the function
 
 =cut
 sub _parse_response {
-  my ($Self, $RespItems) = @_;
+  my ($Self, $RespItems, $ParseMode) = @_;
 
   # Loop until we get the tagged response for the sent command
   my $Result;
   my $Tag = '';
   my (%DataResp, $CompletionResp, $Res1, $Callback, %UnfixCache);
+
+  # Build final parse mode. Note overrides come second to replace defaults
+  my %ParseMode = (%{$Self->{ParseMode} || {}}, %{$ParseMode || {}});
 
   # Some commands might have no results (eg list, fetch, etc), but we
   #  want to distinguish no results vs IMAP NO result, so setup a default
@@ -3173,7 +3228,7 @@ sub _parse_response {
       # Parse fetch response into perl structure
       my $Fetch;
       if ($Res2 eq 'fetch') {
-        $Fetch = _parse_fetch_result($Self->_next_atom(), $Self->{ParseMode});
+        $Fetch = _parse_fetch_result($Self->_next_atom(), \%ParseMode);
       }
 
       if (ref($RespItems) && ($Callback = $RespItems->{$Res2})) {
@@ -4278,17 +4333,20 @@ sub _parse_fetch_result {
     } elsif ($Type eq 'bodystructure') {
       $Value = _parse_bodystructure($Value, @$ParseMode{qw(EnvelopeRaw DecodeUTF8)})
         if $ParseMode->{BodyStructure};
-    } elsif ($Type =~ /^(body|binary)(?:\.peek)?\[(.*)/) {
+    } elsif ($Type =~ /^(body|binary)(?:\.peek)?\[([^\]]*)/) {
       my $BodyArgs = $2;
 
-      # Make 'body[]', 'body[]<0>', etc into plain 'body'
+      # Make 'body[]', 'body[]<0>', etc into plain 'body' (unless FullBody mode)
       $Type = $1;
 
       if ($BodyArgs =~ /^[\d.]*header/) {
         _parse_header_result($ResultHash{headers} ||= {}, $Value, $FetchResult);
+      } else {
+        $Type .= "[${BodyArgs}]" if $ParseMode->{FullBody}
       }
     } elsif ($Type eq 'annotation') {
-      $Value = _parse_fetch_annotation($Value);
+      $Value = _parse_fetch_annotation($Value)
+        if $ParseMode->{Annotation};
     }
 
     # Store result (either modified or original) into hash
