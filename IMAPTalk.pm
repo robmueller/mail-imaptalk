@@ -328,8 +328,8 @@ use constant LBLEN => length(LB);
 
 # Regexps used to determine if header is MIME encoded (we remove . from
 #  especials because of dumb ANSI_X3.4-1968 encoding)
-my $RFC1522Token = qr/[^\x00-\x1f\(\)\<\>\@\,\;\:\"\/\[\]\?\=\ ]+/;
-my $NeedDecodeUTF8Regexp = qr/=\?$RFC1522Token\?$RFC1522Token\?[^\?]*\?=/;
+my $RFC2047Token = qr/[^\x00-\x1f\(\)\<\>\@\,\;\:\"\/\[\]\?\=\ ]+/;
+my $NeedDecodeUTF8Regexp = qr/=\?$RFC2047Token\?$RFC2047Token\?[^\?]*\?=/;
 
 # Known untagged responses
 my %UntaggedResponses = map { $_ => 1 } qw(exists expunge recent);
