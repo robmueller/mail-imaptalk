@@ -1128,6 +1128,31 @@ sub set_tracing {
   return $OldTrace;
 }
 
+=item I<set_unicode_folders($Unicode)>
+
+$Unicode should be 1 or 0
+
+Sets whether folder names are expected and returned
+as perl unicode strings.
+
+The default is currently 0, BUT YOU SHOULD NOT ASSUME THIS,
+because it will probably change in the future.
+
+If you want to work with perl unicode strings for
+folder names, you should call
+  $ImapTalk->set_unicode_folders(1)
+and IMAPTalk will automatically encode the unicode
+strings into IMAP-UTF7 when sending to the IMAP server,
+and will also decode IMAP-UTF7 back into perl unicode
+strings when returning results from the IMAP server.
+
+If you want to work with folder names in IMAP-UTF7 bytes,
+then call
+  $ImapTalk->set_unicode_folders(0)
+and IMAPTalk will leave folder names as bytes when
+sending to and returning results from the IMAP server.
+
+=cut
 sub set_unicode_folders {
   my $Self = shift;
   $Self->{Cache}->{UnicodeFolders} = shift;
@@ -3970,12 +3995,6 @@ sub _fix_folder_name {
     $FolderName = Encode::encode( 'IMAP-UTF-7', $FolderName );
   }
 
-  if (! $Self->unicode_folders() ) {
-    warn("Please report to rjlov");
-    Carp::cluck("Warning only: IMAPTalk not using unicode_folders");
-    warn("Please report to rjlov");
-  }
-
   return $FolderName if $WildCard && $FolderName =~ /[\*\%]/;
 
   # XXX - make more general/configurable
@@ -4012,12 +4031,6 @@ sub _unfix_folder_name {
   if ( $UnicodeFolders && ( $FolderName =~ m{&} ) )
   {
     $FolderName = Encode::decode( 'IMAP-UTF-7', $FolderName );
-  }
-
-  if (! $UnicodeFolders ) {
-    warn("Please report to rjlov");
-    Carp::cluck("Warning only: IMAPTalk not using unicode_folders");
-    warn("Please report to rjlov");
   }
 
   return $FolderName;
