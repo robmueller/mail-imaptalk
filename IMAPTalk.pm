@@ -1850,6 +1850,82 @@ sub close {
   $Self->state(Authenticated);
 }
 
+=item I<idle(\&Callback, [ $Timeout ])>
+
+Perform an IMAP idle call. Call given callback for each IDLE event
+received.
+
+If the callback returns 0, the idle continues. If the callback returns 1,
+the idle is finished and this call returns.
+
+If no timeout is passed, will continue to idle until the callback returns
+1 or the server disconnects.
+
+If a timeout is passed (including a 0 timeout), the call will return if
+no events are received within the given time. It will return the result
+of the DONE command, and set $Self->get_response_code('timeout') to true.
+
+If the server closes the connection with a "bye" response, it will
+return undef and $@ =~ /bye/ will be true with the remainder of the bye
+line following.
+
+=cut
+sub idle {
+  my ($Self, $Callback, $Timeout) = @_;
+
+  # Create a closure to handle the idle semantics that runs
+  #  between sending the command and parsing the tagged
+  #  response (that only appears after sending DONE)
+  my $PostCommand = sub {
+    local $Self->{Timeout} = $Timeout if $Timeout;
+
+    $Self->{ReadLine} = undef;
+
+    my $Resp = $Self->_next_atom();
+    my ($Text) = @{$Self->_remaining_atoms()};
+    if (!$Resp || !$Text || $Resp ne '+' || $Text ne 'idling') {
+      die "IMAPTalk: Did not get '+ idling' response";
+    }
+
+    # Special case 0 timeout
+    if (defined $Timeout && $Timeout == 0) {
+      $Self->{Cache}->{timeout} = 1;
+      goto DoneIdle;
+    }
+
+    # If callback returns true, set $Exit to exit loop
+    my $Exit = 0;
+    my $WrapCallback = sub { $Exit = $Callback->(@_); };
+    my %ParseCB = map { $_ => $WrapCallback } qw(exists recent expunge fetch);
+
+    while (!$Exit) {
+      eval {
+        $Self->_parse_response(\%ParseCB, { IdleResponse => 1 });
+      };
+      if ($@) {
+        if ($@ =~ /timed out/) {
+          $Self->{Cache}->{timeout} = 1;
+          goto DoneIdle;
+
+        } elsif ($@ =~ /closed by host/) {
+          die "IMAPTalk: bye: " . $Self->get_response_code('bye');
+
+        } else {
+          die $@;
+        }
+      }
+    }
+
+    # Send DONE, and then fallout to parse response
+    DoneIdle:
+    $Self->_imap_socket_out("DONE" . LB);
+  };
+
+  my %ParseMode = (PostCommand => $PostCommand);
+  return $Self->_imap_cmd(\%ParseMode, 'idle', 0, '');
+}
+
+
 =back
 =cut
 
@@ -3005,6 +3081,7 @@ sub _imap_cmd {
   eval {
     # Send the command and parse the response
     $Self->_send_cmd($Cmd, @_);
+    $ParseMode->{PostCommand}->() if $ParseMode->{PostCommand};
     # Items returned are the complete response (eg ok/bad/no) and
     #  the any parsed data to return from the command
     ($CompletionResp, $DataResp) = $Self->_parse_response($RespItems, $ParseMode);
@@ -3397,6 +3474,7 @@ sub _parse_response {
       $DataResp{metadata}->{$Name}->{$Bits->[0]} = $Bits->[1];
 
     } elsif (($Res1 eq 'bye') && ($Self->{LastCmd} ne 'logout')) {
+      $Self->{Cache}->{bye} = $Self->_remaining_line();
       die "IMAPTalk: Connection was unexpectedly closed by host";
 
     } elsif ($Res1 eq 'no' || $Res1 eq 'bad') {
@@ -3411,6 +3489,7 @@ sub _parse_response {
       die 'IMAPTalk: Unexpected data remaining on response line "' . $Self->{ReadLine} . '"';
     }
 
+    last if $ParseMode{IdleResponse};
   }
 
   # Return the requested item from %DataResp, and put
