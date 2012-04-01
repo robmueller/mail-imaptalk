@@ -1666,6 +1666,9 @@ commands at once and wait for responses. This speeds up latency issues.
 
 Returns a hash ref of folder name => status results.
 
+If an error occurs, the annotation result is a scalar ref to the completion
+response string (eg 'bad', 'no', etc)
+
 =cut
 sub multistatus {
   my ($Self, $Items, @FolderList) = @_;
@@ -1685,7 +1688,7 @@ sub multistatus {
   $Self->{CmdId} = $FirstId;
   for (@FolderList) {
     my ($CompletionResp, $DataResp) = $Self->_parse_response("status");
-    $Resp{$_} = ref($DataResp) ? $DataResp : $CompletionResp;
+    $Resp{$_} = ref($DataResp) ? $DataResp : \$CompletionResp;
     $Self->{CmdId}++;
   }
 
@@ -1809,6 +1812,9 @@ issues.
 
 Returns a hash ref of folder name => annotation results.
 
+If an error occurs, the annotation result is a scalar ref to the completion
+response string (eg 'bad', 'no', etc)
+
 =cut
 sub multigetannotation {
   my ($Self, $Entry, $Attribute, @FolderList) = @_;
@@ -1825,7 +1831,7 @@ sub multigetannotation {
   $Self->{CmdId} = $FirstId;
   for (@FolderList) {
     my ($CompletionResp, $DataResp) = $Self->_parse_response("annotation");
-    $Resp{$_} = ref($DataResp) ? $DataResp->{$_}->{$Entry}->{$Attribute} : $CompletionResp;
+    $Resp{$_} = ref($DataResp) ? $DataResp->{$_}->{$Entry}->{$Attribute} : \$CompletionResp;
     $Self->{CmdId}++;
   }
 
