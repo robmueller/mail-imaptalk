@@ -2828,10 +2828,8 @@ However, if you set the C<parse_mode(BodyStructure => 1)>, then the result would
         'Size' => '3569',
         'Lines' => '94',
         'Content-MD5' => undef,
-        'Content-Disposition' => [
-          'INLINE',
-          undef
-        ],
+        'Disposition-Type' => 'inline',
+        'Content-Disposition' => {},
         'Content-Language' => undef,
         'Remainder' => [],
         'IMAP-Partnum' => ''
@@ -2869,6 +2867,8 @@ In general, the following items are defined for all body structures:
 =item * MIME-Subtype
 
 =item * Content-Type
+
+=item * Disposition-Type
 
 =item * Content-Disposition
 
@@ -4329,7 +4329,8 @@ sub _parse_bodystructure {
       'MIME-Type',           'multipart',
       'MIME-Subtype',        lc(shift(@$Bs)),
       'Content-Type',        _parse_list_to_hash(shift(@$Bs)),
-      'Content-Disposition', _parse_list_to_hash(shift(@$Bs), 1),
+      'Disposition-Type',    lc(shift(@{$Bs->[0]})),
+      'Content-Disposition', _parse_list_to_hash(@{shift(@$Bs)}),
       'Content-Language',    shift(@$Bs),
       'Content-Location',    shift(@$Bs),
       # Shouldn't be anything after this. Add as remainder if there is
@@ -4375,7 +4376,8 @@ sub _parse_bodystructure {
       'Content-Transfer-Encoding',  shift(@$Bs),
       'Size',                       shift(@$Bs),
       'Content-MD5',                shift(@$Bs),
-      'Content-Disposition',        _parse_list_to_hash(shift(@$Bs), 1),
+      'Disposition-Type',           lc(shift(@{$Bs->[0]})),
+      'Content-Disposition',        _parse_list_to_hash(@{shift(@$Bs)}),
       'Content-Language',           shift(@$Bs),
       'Content-Location',           shift(@$Bs),
       # Shouldn't be anything after this. Add as remainder if there is
