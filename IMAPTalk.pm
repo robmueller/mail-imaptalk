@@ -4225,10 +4225,12 @@ sub _parse_email_address {
 
     # Build 'ename@ecorp.com' part
     my $EmailStr = (defined $Adr->[2] ? $Adr->[2] : '')
-                 . '@' 
+                 . '@'
                  . (defined $Adr->[3] ? $Adr->[3] : '');
     # If the email address has a name, add it at the start and put <> around address
     if (defined $Adr->[0] and $Adr->[0] ne '') {
+      # CRLF's are folding that's leaked into data where it shouldn't, strip them
+      $Adr->[0] =~ s/\r?\n//g;
       _decode_utf8($Adr->[0]) if $DecodeUTF8 && $Adr->[0] =~ $NeedDecodeUTF8Regexp;
       # Strip any existing \"'s
       $Adr->[0] =~ s/\"//g;
