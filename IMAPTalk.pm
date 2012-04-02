@@ -3134,7 +3134,7 @@ sub _send_cmd {
 
   # Output remainder of line buffer (if empty, we still want
   #  to send the \015\012 chars)
-  $Self->_imap_socket_out($LineBuffer . LB);
+  $Self->_imap_socket_out($LineBuffer . LB) if defined $LineBuffer;
 
   return 1;
 }
@@ -3258,9 +3258,11 @@ sub _send_data {
           $Self->_copy_handle_to_handle($Arg, $Self->{Socket}, $LiteralSize);
         }
 
-      # If no "+ go ahead" response, set error state
+      # If no "+ go ahead" response, stick back in read buffer and fall out
+      #  to parse what the response was
       } else {
-        die 'IMAPTalk: Did not get "+ ...go ahead..." response from IMAP server. Got - ' . $GoAhead;
+        substr($Self->{ReadBuf}, 0, 0, $GoAhead . LB);
+        return undef;
       }
 
     }
