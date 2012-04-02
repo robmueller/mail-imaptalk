@@ -2441,10 +2441,12 @@ sub find_message {
     # Pull out common MIME fields we'll look at
     my ($MTT, $MT, $ST, $SP) = @$BS{qw(MIME-TxtType MIME-Type MIME-Subtype MIME-Subparts)};
 
-    my $CD = $BS->{'Content-Disposition'} || {};
+    # Note: $DT can be "", which really is default "inline", so compare
+    #  with "$DT ne 'attachment'", rather than "$DT eq 'inline'"
+    my ($DT, $CD) = @$BS{qw(Disposition-Type Content-Disposition)};
 
     # Yay, found text component that ins't an attachment or has a filename
-    if ($MT eq 'text' && (!exists $CD->{attachment} && !$CD->{inline}->{filename})) {
+    if ($MT eq 'text' && ($DT ne 'attachment' && !$CD->{filename} && !$CD->{'filename*'})) {
 
       # See if it's a sub-type we understand/want
       if ($KnownTextParts{$ST}) {
@@ -2498,7 +2500,7 @@ sub find_message {
     } elsif ($MT eq 'image') {
 
       # Only add inline images
-      if (!exists $CD->{attachment}) {
+      if ($DT ne 'attachment') {
         # In alternative parts, we store which list part
         #  we're in in $InsideAlt
         my $ItemList = $MsgComponents{$$MultiTypeRef . 'list'};
@@ -2520,7 +2522,7 @@ sub find_message {
       my @SubParts = map { [ $BS, $_, $Pos++, $SubMultiList, \$MultiType ] } @$SP;
 
       # If it's a signed/alternative/related sub-part, look in it FIRST
-      if ($ST eq 'signed' || $ST eq 'alternative' || $ST eq 'related' || $CD->{inline}) {
+      if ($ST eq 'signed' || $ST eq 'alternative' || $ST eq 'related' || $DT ne 'attachment') {
         unshift @PartList, @SubParts;
 
       # Otherwise look in it after we've looked at all the other components
