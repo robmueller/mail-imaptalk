@@ -3979,14 +3979,14 @@ sub _copy_handle_to_handle {
   my $Val;
   while (my $NRead = $InHandle->read($Val, 8192)) {
     if (!defined $NRead) {
-      die 'IMAPTalk: Error reading data from io handle.' . $@;
+      die 'IMAPTalk: Error reading data from io handle.' . $!;
     }
 
     my $NWritten = 0;
     while ($NWritten != $NRead) {
       my $NWrite = $OutHandle->syswrite($Val, $NRead-$NWritten, $NWritten);
       if (!defined $NWrite) {
-        die 'IMAPTalk: Error writing data to io handle.' . $@;
+        die 'IMAPTalk: Error writing data to io handle.' . $!;
       }
       $NWritten += $NWrite;
     }
