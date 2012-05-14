@@ -925,12 +925,17 @@ sub literal_handle_control {
   return $Self->{LiteralControl} ? 1 : 0;
 }
 
-=item I<release_socket()>
+=item I<release_socket($Error)>
 
 Release IMAPTalk's ownership of the current socket it's using so it's not
-disconnected on DESTROY. This returns the socket, and makes sure that the 
-IMAPTalk object doesn't hold a reference to it any more. 
-This means you can't call any methods on the IMAPTalk object any more.  
+disconnected on DESTROY. This returns the socket, and makes sure that the
+IMAPTalk object doesn't hold a reference to it any more and the connection
+state is set to "Unconnected".
+
+This means you can't call any methods on the IMAPTalk object any more.
+
+If the socket is being released due to an error condition on the connection,
+then $Error is set to true.
 
 =cut
 sub release_socket {
@@ -946,6 +951,9 @@ sub release_socket {
 
   $Self->_trace("A: Release socket, fileno=" . fileno($Socket) . "\n")
     if $Self->{Trace};
+
+  # Set into no connection state
+  $Self->state(Mail::IMAPTalk::Unconnected);
 
   return $Socket;
 }
@@ -3094,10 +3102,16 @@ sub _imap_cmd {
   # Return undef if any error occurred (either through 'die' or non-'OK' IMAP response)
   if ($@) {
     warn($@) if $@ !~ /NO Over quota/;
+
+    # One of our errors? Capture, set $@ and return undef
     if ($@ =~ /IMAPTalk/ && !$Self->{Pedantic}) {
       $Self->{LastError} = $@ = "IMAP Command : '$Cmd' failed. Reason was : $@";
       return undef;
     }
+
+    # If something else threw the error, rethrow, but release socket first since
+    #  connection is in an indeterminate state
+    $Self->release_socket(1);
     die $@;
   };
 
