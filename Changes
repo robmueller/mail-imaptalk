@@ -1,5 +1,44 @@
 Revision history for Perl extension Mail::IMAPTalk.
 
+3.01  Tue Jul 10 11:00 2012
+  - Bumping major version again because of fetch response
+     format changes (Content-Disposition and annotation changes)
+  - Documentation updates.
+     Update to SORT RFC, update to latest ACL RFC
+  - Update get_response_code docs
+  - Alert reponse is remainder of line, put that in the response code
+     Hack around fact alert response is the remainder of the
+     line after the ], it's not an argument inside the [...],
+     but make it look that way because makes API easier
+     to just call get_response_code
+  - Deal with annoying ANSI_X3.4-1968 encoded headers
+  - Handle servers which don't return any untagged sort/search results, but OK response
+  - Add a Pedantic mode to the parser
+     Will die if a line with an unexpected tag appears
+     when parsing responses. Useful for test suite
+     writers.
+  - Fix parsing of server welcome banner
+  - Always increase CmdId, and rethrow error in pedantic mode
+  - Handle buggy multiple spaces in XIMAPPROXY response
+  - Doc updates and misc fixes
+  - Make Mail::IMAPTalk work on perl 5.8
+  - Add per-command parse mode, and parsing for annotations
+  - Document unicode folders and remove old warnings
+  - Improve find_message
+  - Typo fixes, remove need for Carp
+  - use RFC2047 not RFC1522
+  - Atoms can have } in them
+  - Allow reporting errors for multigetannotation
+  - Add IDLE command support
+  - Break Content-Disposition into separate parts like Content-Type
+    (NOTE: This changes the result of fetches and is backwards
+     incompatible)
+  - Improve find_message
+  - Handle literals that fail better (eg no + go ahead response)
+  - Strip newlines if server returns them (it should have unfolded)
+  - Allow release_socket() to take an error flag
+  - Show correct system error on system errors
+
 2.01  Fri Jul 15 17:00 2011
   - Pushing to CPAN. Updating major version
      number because of dozens of small
