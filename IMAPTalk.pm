@@ -4248,9 +4248,16 @@ sub _parse_email_address {
     }
 
     # Build 'ename@ecorp.com' part
-    my $EmailStr = (defined $Adr->[2] ? $Adr->[2] : '')
-                 . '@'
-                 . (defined $Adr->[3] ? $Adr->[3] : '');
+
+    # If domain is "unspecified-domain" and no name part, move localpart to name part
+    if (defined $Adr->[3] && $Adr->[3] eq "unspecified-domain" && !$Adr->[0]) {
+      @$Adr[0,2,3] = ($Adr->[2], undef, undef);
+    }
+
+    my $EmailAdr = defined $Adr->[2] ? $Adr->[2] : '';
+    my $EmailDom = defined $Adr->[3] ? $Adr->[3] : '';
+    my $EmailStr = $EmailAdr || $EmailDom ? $EmailAdr . '@' . $EmailDom : '';
+
     # If the email address has a name, add it at the start and put <> around address
     if (defined $Adr->[0] and $Adr->[0] ne '') {
       # CRLF's are folding that's leaked into data where it shouldn't, strip them
@@ -4258,7 +4265,7 @@ sub _parse_email_address {
       _decode_utf8($Adr->[0]) if $DecodeUTF8 && $Adr->[0] =~ $NeedDecodeUTF8Regexp;
       # Strip any existing \"'s
       $Adr->[0] =~ s/\"//g;
-      $EmailStr = '"' . $Adr->[0] . '" <' . $EmailStr . '>';
+      $EmailStr = '"' . $Adr->[0] . '"' . ($EmailStr ? ' <' . $EmailStr . '>' : '');
     }
 
     push @{$EmailGroups[-1]}, $EmailStr;
