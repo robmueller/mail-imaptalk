@@ -1343,6 +1343,18 @@ sub list {
   return $Self->_imap_cmd("list", 0, "list", @_);
 }
 
+=item I<xlist($Reference, $Name)>
+
+Perform the IMAP 'xlist' extension command to return a list of available
+folders and their special use attributes.
+
+=cut
+sub xlist {
+  my $Self = shift;
+  $Self->_require_capability('xlist') || return undef;
+  return $Self->_imap_cmd("xlist", 0, "xlist", @_);
+}
+
 =item I<lsub($Reference, $Name)>
 
 Perform the standard IMAP 'lsub' command to return a list of subscribed
@@ -3422,13 +3434,12 @@ sub _parse_response {
     } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace') {
       $DataResp{$Res1} = $Self->_remaining_atoms();
 
-    } elsif ($Res1 eq 'list' || $Res1 eq 'lsub') {
+    } elsif ($Res1 eq 'xlist' || $Res1 eq 'list' || $Res1 eq 'lsub') {
       my ($Attr, $Sep, $Name) = @{$Self->_remaining_atoms()};
       $Self->_set_separator($Sep);
       # Remove root text from folder name
       $Name = ($UnfixCache{$Name} ||= $Self->_unfix_folder_name($Name));
       push @{$DataResp{$Res1}}, [ $Attr, $Sep, $Name ];
-
     } elsif ($Res1 eq 'permanentflags' || $Res1 eq 'uidvalidity' ||
       $Res1 eq 'uidnext' || $Res1 eq 'highestmodseq' || $Res1 eq 'numresults') {
       $DataResp{$Res1} = $Self->_next_atom();
