@@ -12,8 +12,7 @@ Mail::IMAPTalk - IMAP client interface with lots of features
       Server   => $IMAPServer,
       Username => 'foo',
       Password => 'bar',
-      Uid      => 1 )
-    || die "Failed to connect/login to IMAP server";
+  ) || die "Failed to connect/login to IMAP server";
 
   # Append message to folder
   open(my $F, 'rfc822msg.txt');
@@ -435,7 +434,7 @@ The password to use to login to the account.
 Control whether message ids are message uids or not. This is 1 (on) by
 default because generally that's how most people want to use it. This affects
 most commands that require/use/return message ids (e.g. B<fetch>, B<search>,
-B<sort>, etc) 
+B<sort>, etc)
 
 =item B<RootFolder>
 
@@ -552,7 +551,7 @@ sub new {
   $Self->{CmdId} = 1;
 
   # Set base modes
-  $Self->uid($Args{Uid});
+  $Self->uid(exists($Args{Uid}) ? $Args{Uid} : 1);
   $Self->parse_mode(Envelope => 1, BodyStructure => 1, Annotation => 1);
   $Self->set_tracing(0);
   $Self->{CurrentFolder} = '';
