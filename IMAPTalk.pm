@@ -97,16 +97,27 @@ require Exporter;
 );
 Exporter::export_ok_tags('Default');
 
+my $AlwaysTrace = 0;
+
 sub import {
   # Test for special case if need UTF8 support
   our $AlreadyLoadedEncode;
-  if (@_>1 && $_[1] && $_[1] eq ':utf8support') {
-    splice @_, 1, 1;
+  my $Class = shift(@_);
+
+  my %Parameters = map { $_ => 1 } @_;
+
+  if (delete($Parameters{':utf8support'})) {
     if (!$AlreadyLoadedEncode) {
-      eval "use Encode qw(decode);";
+      eval "use Encode qw(decode decode_utf8);";
       $AlreadyLoadedEncode = 1;
     }
   }
+
+  if (delete($Parameters{':trace'})) {
+   $AlwaysTrace = 1;
+  }
+
+  @_ = ($Class, keys(%Parameters));
 
   goto &Exporter::import;
 }
@@ -564,6 +575,9 @@ sub new {
   $Self->{Pedantic} = $Args{Pedantic};
   $Self->{PreserveINBOX} = $Args{PreserveINBOX};
 
+  # Do this now, so we trace greeting line as well
+  $Self->set_tracing($AlwaysTrace);
+
   # Process greeting
   if ($Args{Server} || $Args{ExpectGreeting}) {
     $Self->{CmdId} = "*";
@@ -577,7 +591,6 @@ sub new {
   # Set base modes
   $Self->uid(exists($Args{Uid}) ? $Args{Uid} : 1);
   $Self->parse_mode(Envelope => 1, BodyStructure => 1, Annotation => 1);
-  $Self->set_tracing(0);
   $Self->{CurrentFolder} = '';
   $Self->{CurrentFolderMode} = '';
 
