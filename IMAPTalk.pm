@@ -1258,7 +1258,7 @@ sub select {
   if ($Res) {
     # Set internal current folder and mode
     $Self->{CurrentFolder} = $Folder;
-    my $foldermode = $Self->get_response_code('foldermode');
+    my $foldermode = $Self->get_response_code('foldermode') // '';
     if ($foldermode eq 'read-write' and $ReadOnly) {
       # odd, we only asked for it to be read-only.  Buggy Cyrus 2.3.3?
       $foldermode = 'read-only';
