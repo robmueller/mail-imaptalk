@@ -704,6 +704,9 @@ sub capability {
   # Otherwise execute capability command
   my $Capability = $Self->_imap_cmd("capability", 0, "capability");
 
+  # Better be a hash-ref...
+  ($Capability && ref($Capability) eq 'HASH') || return {};
+
   # Save for any future queries and return
   return ($Self->{Cache}->{capability} = $Capability);
 }
