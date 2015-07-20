@@ -1565,6 +1565,12 @@ sub deleteacl {
   return $Self->_imap_cmd("deleteacl", 0, "", $Self->_fix_folder_name(+shift), @_);
 }
 
+sub myrights {
+  my $Self = shift;
+  $Self->_require_capability('acl') || return undef;
+  return $Self->_imap_cmd("myrights", 0, "myrights", $Self->_fix_folder_name(+shift), @_);
+}
+
 =item I<setquota($FolderName, $QuotaDetails)>
 
 Perform the IMAP 'setquota' command to set the usage quota
@@ -3454,7 +3460,7 @@ sub _parse_response {
         $DataResp{$Res1}->{$Name} = $StatusRes;
       }
 
-    } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace') {
+    } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace' || $Res1 eq 'myrights') {
       $DataResp{$Res1} = $Self->_remaining_atoms();
 
     } elsif ($Res1 eq 'xlist' || $Res1 eq 'list' || $Res1 eq 'lsub') {
