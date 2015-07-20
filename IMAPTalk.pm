@@ -2379,6 +2379,344 @@ sub fetch_meta {
   return \%FetchRes;
 }
 
+sub move {
+  my $Self = shift;
+  my $Uids = _fix_message_ids(+shift);
+  my $FolderName = $Self->_fix_folder_name(+shift);
+  $Self->cb_folder_changed($FolderName);
+  return $Self->_imap_cmd("move", 1, "", $Uids, $FolderName, @_);
+}
+
+sub xmove {
+  my $Self = shift;
+  my $Uids = _fix_message_ids(+shift);
+  my $FolderName = $Self->_fix_folder_name(+shift);
+  $Self->cb_folder_changed($FolderName);
+  return $Self->_imap_cmd("xmove", 1, "", $Uids, $FolderName, @_);
+}
+
+=back
+=cut
+
+=head1 IMAP CYRUS EXTENSION METHODS
+
+Methods provided by extensions to the cyrus IMAP server
+
+B<Note:> In all cases where a folder name is used, 
+the folder name is first manipulated according to the current root folder
+prefix as described in C<set_root_folder()>.
+
+=over 4
+=cut
+
+=item I<xrunannotator($MessageIds)>
+
+Run the xannotator command on the given message id's
+
+=cut
+sub xrunannotator {
+  my $Self = shift;
+  return $Self->_imap_cmd("xrunannotator", 1, "fetch", _fix_message_ids(+shift), @_);
+}
+
+=item I<xconvfetch($CIDs, $ChangedSince, $Items)>
+
+Use the server XCONVFETCH command to fetch information about messages
+in a conversation.
+
+CIDs can be a single CID or an array ref of CIDs.
+
+  my $Res = $IMAP->xconvfetch('2fc2122a109cb6c8', 0, '(uid cid envelope)')
+  $Res = {
+    state => { CID => [ HighestModSeq ], ... }
+    folders => [ [ FolderName, UidValidity ], ..., ],
+    found => [ [ FolderIndex, Uid, { Details } ], ... ],
+  }
+
+Note: FolderIndex is an integer index into the folders list
+
+=cut
+sub xconvfetch {
+  my $Self = shift;
+  my $CID = shift;
+
+  my %Results;
+  $Results{found} = \my @Fetch;
+  $Results{folders} = \my @Folders;
+
+  my %FolderMap;
+
+  my %Callbacks = (
+    xconvmeta => sub {
+      my ($CID, $Data) = @{$_[1]};
+      my $Res = _parse_list_to_hash($Data);
+      $Results{state}{$CID} = [ $Res->{modseq} ];
+    },
+
+    fetch => sub {
+      my (undef, $Fetch) = @_;
+      my ($FolderName, $UidValidity, $Uid) = delete @$Fetch{qw(folder uidvalidity uid)};
+      $FolderName = $Self->_unfix_folder_name($FolderName);
+      if (!exists $FolderMap{$FolderName}) {
+        my $FolderIndex = scalar @Folders;
+        push @Folders, [ $FolderName, $UidValidity ];
+        $FolderMap{$FolderName} = $FolderIndex;
+      }
+      push @Fetch, [ $FolderMap{$FolderName}, int($Uid), $Fetch ];
+    }
+  );
+
+  $Self->_imap_cmd("xconvfetch", 0, \%Callbacks, $CID, @_)
+    || return undef;
+
+  return \%Results;
+}
+
+=item I<xconvmeta($CIDs, $Items)>
+
+Use the server XCONVMETA command to fetch information about
+a conversation.
+
+CIDs can be a single CID or an array ref of CIDs.
+
+  my $Res = $IMAP->xconvmeta('2fc2122a109cb6c8', '(senders exists unseen)')
+  $Res = {
+    CID1 => { senders => { name => ..., email => ... }, exists => ..., unseen => ..., ...  },
+    CID2 => { ...  },
+  }
+
+=cut
+sub xconvmeta {
+  my ($Self, $CIDs, $Args) = @_;
+
+  # Fix folder names in passed folderexists and folderunseen arguments
+  $Self->_find_arg($Args, 'folderexists', sub { $_ = $Self->_fix_folder_name($_) for @$_; });
+  $Self->_find_arg($Args, 'folderunseen', sub { $_ = $Self->_fix_folder_name($_) for @$_; });
+
+  my %Results;
+
+  my %Callbacks = (
+    xconvmeta => sub {
+      my (undef, $Data) = @_;
+      my $Res = _parse_list_to_hash($Data->[1]);
+      my %ResHash;
+      foreach my $Item (keys %$Res) {
+        if (lc($Item) eq 'senders') {
+          $ResHash{senders} = [
+            map {
+              _decode_utf8($_->[0]) if defined $_->[0];
+              {
+               name => $_->[0],
+               email => "$_->[2]\@$_->[3]",
+              }
+            } @{$Res->{$Item}} ];
+        }
+        elsif (lc($Item) eq 'count') {
+          my %FolderCount = @{$Res->{$Item}};
+          $ResHash{count} = { map {
+             $Self->_unfix_folder_name($_) => int($FolderCount{$_})
+          } keys %FolderCount };
+        }
+        elsif (lc($Item) eq 'folderexists') {
+          my %FolderExists = @{$Res->{$Item}};
+          $ResHash{folderexists} = { map { 
+             $Self->_unfix_folder_name($_) => int($FolderExists{$_})
+          } keys %FolderExists };
+        }
+        elsif (lc($Item) eq 'folderunseen') {
+          my %FolderUnseen = @{$Res->{$Item}};
+          $ResHash{folderunseen} = { map { 
+             $Self->_unfix_folder_name($_) => int($FolderUnseen{$_})
+          } keys %FolderUnseen };
+        }
+        else {
+          $ResHash{lc($Item)} = int($Res->{$Item} // 0); # numeric
+        }
+
+      }
+      $Results{$Data->[0]} = \%ResHash;
+    },
+  );
+
+  $Self->_imap_cmd("xconvmeta", 0, \%Callbacks, $CIDs, $Args)
+    || return undef;
+
+  return \%Results;
+}
+
+=item I<xconvsort($Sort, $Window, $Charset, @SearchParams)>
+
+Use the server XCONVSORT command to fetch exemplar conversation
+messages in a mailbox.
+
+  my $Res = $IMAP->xconvsort( [ qw(reverse arrival) ], [ 'conversations', position => [1, 10] ], 'utf-8', 'ALL')
+  $Res = {
+    sort => [ Uid, ... ],
+    position => N,
+    highestmodseq => M,
+    uidvalidity => V,
+    uidnext => U,
+    total => R,
+  }
+
+=cut
+sub xconvsort {
+  my ($Self, $Sort, $Window, @Search) = @_;
+
+  my %Callbacks = (responseitem => 'sort');
+  my $Res = $Self->_imap_cmd("xconvsort", 0, \%Callbacks, $Sort, $Window, @Search)
+    || return undef;
+
+  my %Results;
+  $Results{'sort'} = $Res if ref($Res);
+  for (qw(position highestmodseq uidvalidity uidnext total)) {
+    $Results{$_} = delete $Self->{Cache}->{$_};
+  }
+
+  return \%Results;
+}
+
+=item I<xconvupdates($Sort, $Window, $Charset, @SearchParams)>
+
+Use the server XCONVUPDATES command to find changed exemplar
+messages
+
+  my $Res = $IMAP->xconvupdates( [ qw(reverse arrival) ], [ 'conversations', changedsince => [ $mod_seq, $uid_next ] ], 'utf-8', 'ALL');
+  $Res = {
+    added => [ [ Uid, Pos ], ... ],
+    removed => [ Uid, ... ],
+    changed => [ CID, ... ],
+    highestmodseq => M,
+    uidvalidity => V,
+    uidnext => U,
+    total => R,
+  }
+
+=cut
+sub xconvupdates {
+  my ($Self, $Sort, $Window, @Search) = @_;
+ 
+  my %Results;
+
+  my %Callbacks = (
+    added => sub { $Results{added} = $_[1]; },
+    removed => sub { $Results{removed} = $_[1]; },
+    changed => sub { $Results{changed} = $_[1]; },
+  );
+
+  my $Res = $Self->_imap_cmd("xconvupdates", 0, \%Callbacks, $Sort, $Window, @Search)
+    || return undef;
+
+  for (qw(highestmodseq uidvalidity uidnext total)) {
+    $Results{$_} = delete $Self->{Cache}->{$_};
+  }
+
+  return \%Results;
+}
+
+=item I<xconvmultisort($Sort, $Window, $Charset, @SearchParams)>
+
+Use the server XCONVMULTISORT command to fetch messages across
+all mailboxes
+
+  my $Res = $IMAP->xconvmultisort( [ qw(reverse arrival) ], [ 'conversations', postion => [1,10] ], 'utf-8', 'ALL')
+  $Res = {
+    folders => [ [ FolderName, UidValidity ], ... ],
+    sort => [ FolderIndex, Uid ], ... ],
+    position => N,
+    highestmodseq => M,
+    total => R,
+  }
+
+Note: FolderIndex is an integer index into the folders list
+
+=cut
+sub xconvmultisort {
+  my ($Self, $Sort, $Window, @Search) = @_;
+
+  $Self->_find_arg(\@Search, 'folder', sub { $_ = $Self->_fix_folder_name($_) });
+  $Self->_find_arg($Window, 'multianchor', sub { $_->[1] = $Self->_fix_folder_name($_->[1]) });
+
+  my ($FolderList, $SortList);
+
+  my %Callbacks = (xconvmulti => sub { ($FolderList, $SortList) = @{$_[1]}; });
+  my $Res = $Self->_imap_cmd("xconvmultisort", 0, \%Callbacks, $Sort, $Window, @Search)
+    || return undef;
+
+  $_->[0] = $Self->_unfix_folder_name($_->[0]) for @$FolderList;
+
+  my %Results;
+  $Results{'folders'} = $FolderList;
+  $Results{'sort'} = $SortList;
+  for (qw(position highestmodseq total)) {
+    $Results{$_} = delete $Self->{Cache}->{$_};
+  }
+
+  return \%Results;
+}
+
+=item I<xsnippets($Items, $Charset, @SearchParams)>
+
+Use the server XSNIPPETS command to fetch message search snippets
+
+  my $Res = $IMAP->xsnippets( [ [ FolderName, UidValidity, [ Uid, ... ] ], ... ], 'utf-8', 'ALL')
+  $Res = {
+    folders => [ [ FolderName, UidValidity ], ... ],
+    snippets => [
+      [ FolderIndex, Uid, Location, Snippet ],
+      ...
+    ]
+  ]
+
+Note: FolderIndex is an integer index into the folders list
+
+=cut
+sub xsnippets {
+  my ($Self, $Items, @Search) = @_;
+
+  $Self->_find_arg(\@Search, 'folder', sub { $_ = $Self->_fix_folder_name($_) });
+
+  # Fix folder names passed in items argument
+  $_->[0] = $Self->_fix_folder_name($_->[0]) for @$Items;
+
+  my %Results;
+  $Results{snippets} = \my @Snippets;
+  $Results{folders} = \my @Folders;
+
+  my %FolderMap;
+
+  my %Callbacks = (snippet => sub {
+    my ($FolderName, $UidValidity, $Uid, $Location, $Snippet) = @{$_[1]};
+    $FolderName = $Self->_unfix_folder_name($FolderName);
+    if (!exists $FolderMap{$FolderName}) {
+      my $FolderIndex = scalar @Folders;
+      push @Folders, [ $FolderName, $UidValidity ];
+      $FolderMap{$FolderName} = $FolderIndex;
+    }
+    eval { $Snippet = decode_utf8($Snippet) };
+    $Snippet =~ s/\x{fffd}//g; # Remove any bogus replacement chars, ugly display
+    push @Snippets, [ $FolderMap{$FolderName}, int($Uid), $Location, $Snippet ];
+  });
+
+  my $Res = $Self->_imap_cmd("xsnippets", 0, \%Callbacks, $Items, @Search)
+    || return undef;
+
+  return \%Results;
+}
+
+sub xwarmup {
+  my $Self = shift;
+  $Self->_find_arg($_[1], 'uids', sub { $_ = _fix_message_ids($_) });
+  return $Self->_imap_cmd("xwarmup", 0, "", $Self->_fix_folder_name(+shift), @_);
+}
+
+sub xmeid {
+  my $Self = shift;
+  my $XMEId = shift || '';
+  return 1 if ($Self->{CurrentXMEId} || '') eq $XMEId;
+  $Self->{CurrentXMEId} = $XMEId;
+  return $Self->_imap_cmd('xmeid', 0, '', $XMEId);
+}
 
 =back
 =cut
@@ -4147,6 +4485,17 @@ sub _parse_list_to_hash {
   }
 
   return \%Res;
+}
+
+sub _find_arg {
+  my ($Self, $Args, $Term, $CB) = @_;
+
+  for (0 .. @$Args-1) {
+    if (!ref $Args->[$_] && lc($Args->[$_]) eq $Term) {
+      # Alias arg into $_ and call callback
+      $CB->() for $Args->[$_+1];
+    }
+  }
 }
 
 =item I<_fix_folder_name($FolderName, $WildCard)>
