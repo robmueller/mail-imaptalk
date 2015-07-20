@@ -639,7 +639,8 @@ sub logout {
   # Callback to say we're switching folders
   $Self->cb_switch_folder($Self->{CurrentFolder}, '');
   $Self->_imap_cmd('logout', 0, '');
-  $Self->state(Unconnected);
+  # Returns the socket, which we immediately discard to close
+  $Self->release_socket(1);
   return 1;
 }
 
@@ -936,7 +937,7 @@ sub literal_handle_control {
   return $Self->{LiteralControl} ? 1 : 0;
 }
 
-=item I<release_socket($Error)>
+=item I<release_socket($Close)>
 
 Release IMAPTalk's ownership of the current socket it's using so it's not
 disconnected on DESTROY. This returns the socket, and makes sure that the
@@ -945,8 +946,7 @@ state is set to "Unconnected".
 
 This means you can't call any methods on the IMAPTalk object any more.
 
-If the socket is being released due to an error condition on the connection,
-then $Error is set to true.
+If the socket is being released and being closed, then $Close is set to true.
 
 =cut
 sub release_socket {
