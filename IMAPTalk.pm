@@ -4255,31 +4255,19 @@ sub _fill_imap_read_buffer {
 
   # Wait for data to become available, signals can interrupt
   # select() calls, so loop until definitely past $Timeout time
-  # If NotifyLongRequestThreshold is set, then every time we wait longer
-  # than that for data, call NotifyLongRequest
   my @ReadList;
   my ($StartTime, $UsedTime) = (time, 0);
-  my $NextNotify = $Self->{NotifyLongRequestThreshold} || 0;
   do {
     if ($Blocking) {
       @ReadList = ( $Self->{Socket} );
     }
     else {
       my $ThisTimeout = $Timeout;
-      if ( $NextNotify
-        && ( ( !defined($Timeout) ) || ( $NextNotify < $Timeout ) ) )
-      {
-        $ThisTimeout = $NextNotify;
-      }
       @ReadList =
         $Self->{Select}->can_read(
         defined($ThisTimeout) ? ( $ThisTimeout - $UsedTime ) : () );
     }
     $UsedTime = time - $StartTime;
-    if ($NextNotify && ($UsedTime > $NextNotify)) {
-      $Self->NotifyLongRequest();
-      $NextNotify += $Self->{NotifyLongRequestThreshold};
-    }
   } while (!@ReadList && (!defined($Timeout) || $UsedTime < $Timeout));
 
   # If no handles, then timedout
