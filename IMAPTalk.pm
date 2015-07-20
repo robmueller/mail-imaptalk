@@ -1819,6 +1819,43 @@ sub getmetadata {
   return $Self->_imap_cmd("getmetadata", 0, "metadata", @Args, { Quote => [ @_ ] });
 }
 
+=item I<multigetmetadata(\@Entries, @FolderNames)>
+
+Performs many IMAP 'getmetadata' commands on a list of folders. Sends
+all the commands at once and wait for responses. This speeds up latency
+issues.
+
+Returns a hash ref of folder name => metadata results.
+
+If an error occurs, the annotation result is a scalar ref to the completion
+response string (eg 'bad', 'no', etc)
+
+=cut
+sub multigetmetadata {
+  my ($Self, $Entries, @FolderList) = @_;
+  $Self->_require_capability('metadata') || return undef;
+
+  # Send all commands at once
+  my $FirstId = $Self->{CmdId};
+  for (@FolderList) {
+    $Self->_send_cmd("getmetadata", $Self->_fix_folder_name($_, 1), { Quote => ref($Entries) ? $Entries : [ $Entries ] });
+    $Self->{CmdId}++;
+  }
+
+  # Parse responses
+  my %Resp;
+  $Self->{CmdId} = $FirstId;
+  for (@FolderList) {
+    my ($CompletionResp, $DataResp) = $Self->_parse_response("metadata");
+    $Resp{$_} = ref($DataResp) ?
+      (ref($Entries) ? $DataResp->{$_} : $DataResp->{$_}->{$Entries}) :
+      \$CompletionResp;
+    $Self->{CmdId}++;
+  }
+
+  return \%Resp;
+}
+
 =item I<setannotation($FolderName, $Entry, [ $Attribute, $Value ])>
 
 Perform the IMAP 'setannotation' command to get the annotation(s)
@@ -1850,40 +1887,6 @@ sub setmetadata {
   my $Self = shift;
   $Self->_require_capability('metadata') || return undef;
   return $Self->_imap_cmd("setmetadata", 0, "metadata", $Self->_fix_folder_name(+shift, 1), { Quote => [ @_ ] });
-}
-
-=item I<multigetannotation($Entry, $Attribute, @FolderNames)>
-
-Performs many IMAP 'getannotation' commands on a list of folders. Sends
-all the commands at once and wait for responses. This speeds up latency
-issues.
-
-Returns a hash ref of folder name => annotation results.
-
-If an error occurs, the annotation result is a scalar ref to the completion
-response string (eg 'bad', 'no', etc)
-
-=cut
-sub multigetannotation {
-  my ($Self, $Entry, $Attribute, @FolderList) = @_;
-
-  # Send all commands at once
-  my $FirstId = $Self->{CmdId};
-  for (@FolderList) {
-    $Self->_send_cmd("getannotation", $Self->_fix_folder_name($_, 1), { Quote => $Entry }, { Quote => $Attribute });
-    $Self->{CmdId}++;
-  }
-
-  # Parse responses
-  my %Resp;
-  $Self->{CmdId} = $FirstId;
-  for (@FolderList) {
-    my ($CompletionResp, $DataResp) = $Self->_parse_response("annotation");
-    $Resp{$_} = ref($DataResp) ? $DataResp->{$_}->{$Entry}->{$Attribute} : \$CompletionResp;
-    $Self->{CmdId}++;
-  }
-
-  return \%Resp;
 }
 
 =item I<close()>
@@ -3528,7 +3531,8 @@ sub _parse_response {
     } elsif ($Res1 eq 'metadata') {
       my ($Name, $Bits) = @{$Self->_remaining_atoms()};
       $Name = ($UnfixCache{$Name} ||= $Self->_unfix_folder_name($Name));
-      $DataResp{metadata}->{$Name}->{$Bits->[0]} = $Bits->[1];
+      my %Hash = @$Bits;
+      $DataResp{metadata}->{$Name}->{$_} = $Hash{$_} for keys %Hash;
 
     } elsif (($Res1 eq 'bye') && ($Self->{LastCmd} ne 'logout')) {
       $Self->{Cache}->{bye} = $Self->_remaining_line();
