@@ -1,5 +1,24 @@
 Revision history for Perl extension Mail::IMAPTalk.
 
+4.01  Mon Jul 20 12:15 2015
+  - Bump version and update copyright
+  - Remove long command timer
+  - Misc parser and fixes
+  - Avoid / in generated message-id
+  - More improvements to find_message function
+  - Add cyrus IMAP extension commands
+  - Support extended-list options to list command
+  - Avoid undef warning on missing foldermode response
+  - Handle unexpected capability response
+  - Add ability to enable tracing when you "use" the module
+  - Replace multigetannotation with multigetmetadata
+  - Add IMAP myrights command
+  - Add IMAP id command
+  - Use release_socket to close connection
+  - Update root folder and Inbox vs INBOX handling
+  - Choose socket library to use, add SSL socket support
+  - Better formatting of email strings from envelope structure
+
 3.01  Tue Jul 10 11:00 2012
   - Bumping major version again because of fetch response
      format changes (Content-Disposition and annotation changes)

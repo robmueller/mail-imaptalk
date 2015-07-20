@@ -122,7 +122,7 @@ sub import {
   goto &Exporter::import;
 }
 
-our $VERSION = '3.01';
+our $VERSION = '4.01';
 # }}}
 
 # Use modules {{{
@@ -5062,7 +5062,7 @@ documentation setup.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2003-2011 by Opera Software Australia Pty Ltd
+Copyright (C) 2003-2015 by FastMail Pty Ltd
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
