@@ -1803,7 +1803,6 @@ sub getannotation {
   return $Self->_imap_cmd("getannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), { Quote => $_[0] }, { Quote => $_[1] });
 }
 
-
 =item I<getmetadata($FolderName, [ \%Options ], @Entries)>
 
 Perform the IMAP 'getmetadata' command to get the metadata items
@@ -3620,7 +3619,13 @@ sub _send_data {
       if (ref($Arg)) {
         # Array reference, wrap in ()'s
         if (ref($Arg) eq "ARRAY") {
-          $LineBuffer = $Self->_send_data({ Quote => $IsQuote }, $LineBuffer, { Raw => "(", NoNextSpace => 1 }, @$Arg, { Raw => ")", NoSpace => 1 });
+          $LineBuffer = $Self->_send_data(
+            { Quote => $IsQuote },
+            $LineBuffer,
+            { NoSpace => !$AddSpace, Raw => "(", NoNextSpace => 1 },
+            @$Arg,
+            { NoSpace => 1, Raw => ")", NoNextSpace => 1 }
+          );
           next;
 
         # If it's a scalar ref, just use value it references
@@ -3810,9 +3815,13 @@ sub _parse_response {
       if ($Line =~ /\[(.*)\] ?(.*)$/) {
         $Self->{ReadLine} = $1;
         $DataResp{remainder} = $2;
-        # Use atom parser to get internal items
-        $Res1 = lc($Self->_next_atom());
-        goto RepeatSwitch;
+
+        # Use atom parser to get internal items (ignore errors)
+        $Res1 = eval { lc($Self->_next_atom()) };
+        goto RepeatSwitch if defined $Res1;
+
+        # Error case, empty any buffer and keep going
+        $Self->{ReadLine} = '';
       }
 
     } elsif ($Res1 eq 'search' || $Res1 eq 'sort') {
@@ -4153,7 +4162,7 @@ sub _next_atom {
   } while (scalar @AtomStack);
 
   # Return rest of line to read line buffer
-  $Self->{ReadLine} = substr($Line, pos($Line));
+  $Self->{ReadLine} = substr($Line, pos($Line) // 0);
 
   return $Atom;
 }
@@ -4695,8 +4704,8 @@ sub _parse_email_address {
       # CRLF's are folding that's leaked into data where it shouldn't, strip them
       $Adr->[0] =~ s/\r?\n//g;
       _decode_utf8($Adr->[0]) if $DecodeUTF8 && $Adr->[0] =~ $NeedDecodeUTF8Regexp;
-      # Strip any existing \"'s
-      $Adr->[0] =~ s/\"//g;
+      # Strip any existing " and \ chars
+      $Adr->[0] =~ s/["\\]//g;
       $EmailStr = '"' . $Adr->[0] . '"' . ($EmailStr ? ' <' . $EmailStr . '>' : '');
     }
 
@@ -4796,9 +4805,9 @@ sub _parse_bodystructure {
     %Res = (
       'MIME-Subparts',       \@SubParts,
       'MIME-Type',           'multipart',
-      'MIME-Subtype',        lc(shift(@$Bs)),
+      'MIME-Subtype',        lc(shift(@$Bs) // ''),
       'Content-Type',        _parse_list_to_hash(shift(@$Bs)),
-      'Disposition-Type',    lc(shift(@{$Bs->[0]})),
+      'Disposition-Type',    lc(shift(@{$Bs->[0]}) // ''),
       'Content-Disposition', _parse_list_to_hash(@{shift(@$Bs)}),
       'Content-Language',    shift(@$Bs),
       'Content-Location',    shift(@$Bs),
@@ -4845,7 +4854,7 @@ sub _parse_bodystructure {
       'Content-Transfer-Encoding',  shift(@$Bs),
       'Size',                       shift(@$Bs),
       'Content-MD5',                shift(@$Bs),
-      'Disposition-Type',           lc(shift(@{$Bs->[0]})),
+      'Disposition-Type',           lc(shift(@{$Bs->[0]}) // ''),
       'Content-Disposition',        _parse_list_to_hash(@{shift(@$Bs)}),
       'Content-Language',           shift(@$Bs),
       'Content-Location',           shift(@$Bs),
@@ -4983,7 +4992,7 @@ sub _read_int_list {
     $oldpos = $pos;
   }
   my $final = substr($line, $oldpos);
-  push @List, int($final) if $final ne '';
+  push @List, int($final) if $final ne '' && $final ne ' ';
 
   return \@List;
 }
