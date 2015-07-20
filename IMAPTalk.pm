@@ -1367,6 +1367,17 @@ sub xlist {
   return $Self->_imap_cmd("xlist", 0, "xlist", @_);
 }
 
+=item I<id($key => $value, ...)>
+
+Perform the IMAP extension command 'id'
+
+=cut
+sub id {
+  my $Self = shift;
+  $Self->_require_capability('id') || return undef;
+  return $Self->_imap_cmd('id', 0, 'id', { Quote => \@_ });
+}
+
 =item I<lsub($Reference, $Name)>
 
 Perform the standard IMAP 'lsub' command to return a list of subscribed
