@@ -123,6 +123,14 @@ use IO::Socket;
 use Digest;
 use Data::Dumper;
 
+# Choose the best socket class to use (all of these are sub-classes of IO::Socket)
+my $DefSocketClass;
+BEGIN {
+  for (qw(IO::Socket::IP IO::Socket::INET6 IO::Socket::INET)) {
+    if (eval "use $_; 1;") { $DefSocketClass = $_; last; }
+  }
+}
+
 # Use Time::HiRes if available to handle select restarts
 eval 'use Time::HiRes qw(time);';
 
@@ -359,7 +367,13 @@ the B<Socket> option is supplied.
 
 =item B<Port>
 
-The port number on the host to connect to. Defaults to 143 if not supplied.
+The port number on the host to connect to. Defaults to 143 if not supplied
+or 993 if not supplied and UseSSL is true.
+
+=item B<UseSSL>
+
+If true, use an IO::Socket::SSL connection. All other SSL_* arguments
+are passed to the IO::Socket::SSL constructor.
 
 =item B<Socket>
 
@@ -463,20 +477,19 @@ method.
 Examples:
 
   $imap = Mail::IMAPTalk->new(
-            Server          => 'foo.com',
-            Port            => 143,
-            Username        => 'joebloggs',
-            Password        => 'mypassword',
-            Separator       => '.',
-            RootFolder      => 'inbox',
-            CaseInsensitive => 1)
-          || die "Connection to foo.com failed. Reason: $@";
+    Server          => 'foo.com',
+    Port            => 143,
+    Username        => 'joebloggs',
+    Password        => 'mypassword',
+    Separator       => '.',
+    RootFolder      => 'INBOX',
+  ) || die "Connection to foo.com failed. Reason: $@";
 
   $imap = Mail::IMAPTalk->new(
-            Socket => $SSLSocket,
-            State  => Mail::IMAPTalk::Authenticated,
-            Uid    => 0)
-          || die "Could not query on existing socket. Reason: $@";
+    Socket => $SSLSocket,
+    State  => Mail::IMAPTalk::Authenticated,
+    Uid    => 0
+  ) || die "Could not query on existing socket. Reason: $@";
 
 =cut
 sub new {
@@ -505,14 +518,22 @@ sub new {
     # Set starting state
     $Self->state(Unconnected);
 
-    my $Server = $Self->{Server} = $Args{Server} || die "No Server name given";
-    my $Port = $Self->{Port} = $Args{Port} || 143;
+    my %SocketOpts;
+    my $DefaultPort = 143;
+    my $SocketClass = $DefSocketClass;
 
-    # Create a new socket and connect to IMAP server
-    socket($Socket, PF_INET, SOCK_STREAM, getprotobyname('tcp'))
-      || return undef;
-    my $paddr = sockaddr_in($Port, inet_aton($Server));
-    connect($Socket, $paddr) || return undef;
+    if (my $SSLOpt = $Args{UseSSL}) {
+      $SSLOpt = $SSLOpt eq '1' ? '' : " qw($SSLOpt)";
+      eval "use IO::Socket::SSL$SSLOpt; 1;" || return undef;
+      $SocketClass = "IO::Socket::SSL";
+      $DefaultPort = 993;
+      $SocketOpts{$_} = $Args{$_} for grep { /^SSL_/ } keys %Args;
+    }
+
+    $SocketOpts{PeerHost} = $Self->{Server} = $Args{Server} || die "No Server name given";
+    $SocketOpts{PeerPort} = $Self->{Port} = $Args{Port} || $DefaultPort;
+
+    $Socket = ${SocketClass}->new(%SocketOpts) || return undef;
 
     # Force flushing after every write to the socket
     my $ofh = select($Socket); $| = 1; select ($ofh);
