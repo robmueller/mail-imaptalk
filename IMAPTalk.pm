@@ -1368,7 +1368,16 @@ folders.
 =cut
 sub list {
   my $Self = shift;
-  return $Self->_imap_cmd("list", 0, "list", @_);
+  my @Args = @_;
+  # If the first argument is an array ref, then it's an extended list,
+  #  and any folder list is 3rd argument, not 2nd
+  my $FolderPos = ref($Args[0]) ? 2 : 1;
+  if (ref($Args[$FolderPos])) {
+    $Args[$FolderPos] = [ map { $Self->_fix_folder_encoding($_) } @{$Args[$FolderPos]} ];
+  } else {
+    $Args[$FolderPos] = $Self->_fix_folder_encoding($Args[$FolderPos]);
+  }
+  return $Self->_imap_cmd("list", 0, "list", @Args);
 }
 
 =item I<xlist($Reference, $Name)>
