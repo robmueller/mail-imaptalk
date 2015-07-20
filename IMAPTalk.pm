@@ -417,6 +417,13 @@ If supplied and true, and a socket is supplied via the C<Socket>
 option, checks that a greeting line is supplied by the server
 and reads the greeting line.
 
+=item B<PreserveINBOX>
+
+For historical reasons, the special name "INBOX" is rewritten as
+Inbox because it looks nicer on the way out, and back on the way
+in.  If you want to preserve the name INBOX on the outside, set
+this flag to true.
+
 =back
 
 =item B<Login Options>
@@ -461,11 +468,6 @@ method for more details.
 
 If supplied, sets the folder name text string separator character. 
 Passed as the second parameter to the C<set_root_folder()> method.
-
-=item B<CaseInsensitive>
-
-If supplied, passed along with RootFolder to the C<set_root_folder()>
-method.
 
 =item B<AltRootRegexp>
 
@@ -560,6 +562,7 @@ sub new {
   $Self->{LocalFD} = fileno($Socket);
   $Self->{UseBlocking} = $Args{UseBlocking};
   $Self->{Pedantic} = $Args{Pedantic};
+  $Self->{PreserveINBOX} = $Args{PreserveINBOX};
 
   # Process greeting
   if ($Args{Server} || $Args{ExpectGreeting}) {
@@ -586,7 +589,7 @@ sub new {
 
   # Set root folder and separator (if supplied)
   $Self->set_root_folder(
-    $Args{RootFolder}, $Args{Separator}, $Args{CaseInsensitive}, $Args{AltRootRegexp});
+    $Args{RootFolder}, $Args{Separator}, $Args{AltRootRegexp});
 
   return $Self;
 }
@@ -811,20 +814,17 @@ sub is_open {
 
 }
 
-=item I<set_root_folder($RootFolder, $Separator, optional $CaseInsensitive, $AltRootRegexp)>
+=item I<set_root_folder($RootFolder, $Separator, $AltRootRegexp)>
 
 Change the root folder prefix. Some IMAP servers require that all user
 folders/mailboxes live under a root folder prefix (current versions of
 B<cyrus> for example use 'INBOX' for personal folders and 'user' for other
 users folders). If no value is specified, it sets it to ''. You might
 want to use the B<namespace()> method to find out what roots are
-available. The $CaseInsensitive argument is a flag that determines
-whether the root folder should be matched in a case sensitive or
-insensitive way. See below.
+available.
 
 Setting this affects all commands that take a folder argument. Basically
-if the foldername begins with root folder prefix (case sensitive or
-insensitive based on the second argument), it's left as is,
+if the foldername begins with root folder prefix, it's left as is,
 otherwise the root folder prefix and separator char are prefixed to the
 folder name.
 
@@ -835,43 +835,40 @@ other namespaces in your IMAP server.
 Examples:
 
   # This is what cyrus uses
-  $IMAP->set_root_folder('inbox', '.', 1, 'user');
+  $IMAP->set_root_folder('INBOX', '.', qr/^user/);
 
   # Selects 'Inbox' (because 'Inbox' eq 'inbox' case insensitive)
-  $IMAP->select('Inbox');      
-  # Selects 'inbox.blah'
+  $IMAP->select('Inbox');
+  # Selects 'INBOX.blah'
   $IMAP->select('blah');
-  # Selects 'INBOX.fred' (because 'INBOX' eq 'inbox' case insensitive)
-  #IMAP->select('INBOX.fred'); # Selects 'INBOX.fred'
+  # Selects 'INBOX.Inbox.fred'
+  #IMAP->select('Inbox.fred');
   # Selects 'user.john' (because 'user' is alt root)
   #IMAP->select('user.john'); # Selects 'user.john'
 
 =cut
 sub set_root_folder {
-  my ($Self, $RootFolder, $Separator, $CaseInsensitive, $AltRootRegexp) = @_;
+  my ($Self, $RootFolder, $Separator, $AltRootRegexp) = @_;
 
   $RootFolder = '' if !defined($RootFolder);
-  $Separator = '' if !defined($Separator);
-  $AltRootRegexp = '' if !defined($AltRootRegexp);
+  $Separator = '.' if !defined($Separator);
 
-  # Strip of the Separator, if the IMAP-Server already appended it
+  # Strip off the Separator, if the IMAP-Server already appended it
   $RootFolder =~ s/\Q$Separator\E$//;
 
   $Self->{RootFolder} = $RootFolder;
   $Self->{AltRootRegexp} = $AltRootRegexp;
   $Self->{Separator} = $Separator;
-  $Self->{CaseInsensitive} = $CaseInsensitive;
 
-  # A little tricky. We want to promote INBOX.blah -> blah, but
-  # we have to be careful not to loose things like INBOX.inbox
-  # which we leave alone
+  # We map canonical IMAP INBOX to nicer looking Inbox,
+  #  but have to be careful if the root is INBOX as well
 
-  # INBOX             -> INBOX
+  # INBOX             -> Inbox (done in _fix_folder_name)
   # INBOX.blah        -> blah
   # INBOX.inbox       -> INBOX.inbox
-  # INBOX.INBOX       -> INBOX.INBOX
+  # INBOX.Inbox       -> INBOX.Inbox
   # INBOX.inbox.inbox -> INBOX.inbox.inbox
-  # INBOX.inbox.blah  -> INBOX.blah
+  # INBOX.Inbox.blah  -> Inbox.blah
   # user.xyz          -> user.xyz
 
   # RootFolderMatch
@@ -882,26 +879,21 @@ sub set_root_folder {
   # If folder returned matches this, strip $RootFolder . $Separator
   # eg strip inbox. if folder /^inbox\.(?!inbox(\.inbox)*)/
 
-  my ($RootFolderMatch, $UnrootFolderMatch, $RootFolderNormalise);
+  my ($RootFolderMatch, $UnrootFolderMatch);
   if ($RootFolder) {
-    if ($CaseInsensitive) {
-      $RootFolderMatch = qr/\Q${RootFolder}\E(?i:\Q${Separator}${RootFolder}\E)*/i;
-      $UnrootFolderMatch = qr/^\Q${RootFolder}${Separator}\E(?!${RootFolderMatch}$)/i;
-      $RootFolderNormalise = qr/^\Q${RootFolder}\E(\Q${Separator}\E|$)/i;
-    } else {
-      $RootFolderMatch = qr/\Q${RootFolder}\E(?:\Q${Separator}${RootFolder}\E)*/;
-      $UnrootFolderMatch = qr/^\Q${RootFolder}${Separator}\E(?!${RootFolderMatch}$)/;
-      $RootFolderNormalise = qr/^\Q${RootFolder}(?:\Q${Separator}\E|$)/;
-    }
+    # Note the /i on the end to make this case-insensitive
+    $RootFolderMatch = qr/\Q${RootFolder}\E(?:\Q${Separator}${RootFolder}\E)*/i;
+    $UnrootFolderMatch = qr/^\Q${RootFolder}${Separator}\E(?!${RootFolderMatch}$)/;
 
-    $RootFolderMatch = qr/^${RootFolderMatch}$/;
     if ($AltRootRegexp) {
-      $RootFolderMatch = qr/$RootFolderMatch|^(?:${AltRootRegexp})$|^(?:${AltRootRegexp})\Q${Separator}\E/;
+      $RootFolderMatch = qr/^${RootFolderMatch}$|^(?:${AltRootRegexp}(?:\Q${Separator}\E|$))/;
+    } else {
+      $RootFolderMatch = qr/^${RootFolderMatch}$/;
     }
-
   }
-  @$Self{qw(RootFolderMatch UnrootFolderMatch RootFolderNormalise)}
-    = ($RootFolderMatch, $UnrootFolderMatch, $RootFolderNormalise);
+
+  @$Self{qw(RootFolderMatch UnrootFolderMatch)}
+    = ($RootFolderMatch, $UnrootFolderMatch);
 
   return 1;
 }
@@ -914,12 +906,11 @@ Separator.
 
 =cut
 sub _set_separator {
-  my ($Self,$Separator) = @_;
+  my ($Self, $Separator) = @_;
 
   #Nothing to do, if we have the same Separator as before
   return 1 if (defined($Separator) && ($Self->{Separator} eq $Separator));
-  return $Self->set_root_folder($Self->{RootFolder}, $Separator,
-                                $Self->{CaseInsensitive}, $Self->{AltRootRegexp});
+  return $Self->set_root_folder($Self->{RootFolder}, $Separator, $Self->{AltRootRegexp});
 }
 
 =item I<literal_handle_control(optional $FileHandle)>
@@ -4126,17 +4117,12 @@ sub _fix_folder_name {
 
   return '' if $FolderName eq '';
 
-  if ( $Self->unicode_folders()
-    && ( $FolderName =~ m{[^\x00-\x25\x27-\x7f]} ) )
-  {
-    $FolderName = Encode::encode( 'IMAP-UTF-7', $FolderName );
-  }
+  # Map nicer looking Inbox to canonical INBOX
+  return 'INBOX' if ($FolderName eq 'Inbox' and not $Self->{PreserveINBOX});
+
+  $FolderName = $Self->_fix_folder_encoding($FolderName);
 
   return $FolderName if $WildCard && $FolderName =~ /[\*\%]/;
-
-  # XXX - make more general/configurable
-  return $FolderName if $FolderName =~ m{^DELETED\.user\.};
-  return $FolderName if $FolderName =~ m{^RESTORE\.};
 
   my $RootFolderMatch = $Self->{RootFolderMatch}
     || return $FolderName;
@@ -4148,6 +4134,23 @@ sub _fix_folder_name {
   return !$RootFolder ? $FolderName : $RootFolder . $Separator . $FolderName;
 }
 
+=item I<_fix_folder_encoding($FolderName)>
+
+Encode folder name using IMAP-UTF-7
+
+=cut
+sub _fix_folder_encoding {
+  my ($Self, $FolderName) = @_;
+
+  if ( $Self->unicode_folders()
+    && ( $FolderName =~ m{[^\x00-\x25\x27-\x7f]} ) )
+  {
+    $FolderName = Encode::encode( 'IMAP-UTF-7', $FolderName );
+  }
+
+  return $FolderName;
+}
+
 =item I<_unfix_folder_name($FolderName)>
 
 Unchanges a folder name based on the current root folder prefix as set
@@ -4157,12 +4160,11 @@ with the C<set_root_prefix()> call.
 sub _unfix_folder_name {
   my ($Self, $FolderName) = @_;
 
-  # Normalise root folder part
-  my $RFN = $Self->{RootFolderNormalise};
-  $FolderName =~ s/^$RFN/$Self->{RootFolder}$1/ if $RFN;
-
   my $UFM = $Self->{UnrootFolderMatch};
   $FolderName =~ s/^$UFM// if $UFM;
+
+  # Map canonical INBOX to nicer looking Inbox
+  $FolderName = "Inbox" if ($FolderName eq "INBOX" && not $Self->{PreserveINBOX});
 
   my $UnicodeFolders = $Self->unicode_folders();
   if ( $UnicodeFolders && ( $FolderName =~ m{&} ) )
