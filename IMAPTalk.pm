@@ -2995,7 +2995,7 @@ sub generate_cid {
   $Digester->add( $_[1]->{'IMAP-Partnum'} || '' );
   $Digester->add( $_[1]->{'Size'} || 'none' );
   $Digester->add( $_[1]->{'MIME-TxtType'} || 'none' );
-  my $Cid = 'Generated-' . $Digester->b64digest() . '@messagingengine.com';
+  my $Cid = 'generated-' . $Digester->hexdigest() . '@messagingengine.com';
   return $Cid;
 }
 
