@@ -16,7 +16,7 @@ Mail::IMAPTalk - IMAP client interface with lots of features
 
   # Append message to folder
   open(my $F, 'rfc822msg.txt');
-  $IMAP->append($FolderName, $F) || dir $@;
+  $IMAP->append($FolderName, $F) || die $@;
   close($F);
 
   # Select folder and get first unseen message
