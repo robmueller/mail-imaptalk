@@ -1,5 +1,10 @@
 Revision history for Perl extension Mail::IMAPTalk.
 
+4.03  Wed Mar 23 11:50 2016
+  - Bump version and update copyright
+  - add AuthzUser to allow admin override login
+  - add UseCompress to use COMPRESS=DEFLATE support if available
+
 4.01  Mon Jul 20 12:15 2015
   - Bump version and update copyright
   - Remove long command timer
