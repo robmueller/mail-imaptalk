@@ -122,7 +122,7 @@ sub import {
   goto &Exporter::import;
 }
 
-our $VERSION = '4.01';
+our $VERSION = '4.03';
 # }}}
 
 # Use modules {{{
@@ -435,6 +435,17 @@ Inbox because it looks nicer on the way out, and back on the way
 in.  If you want to preserve the name INBOX on the outside, set
 this flag to true.
 
+=item B<UseCompress>
+
+If you have the Compress::Zlib package installed, and the server
+supports compress, then setting this flag to true will cause
+compression to be enabled immediately after login.
+
+=item B<AuthzUser>
+
+If the server supports AUTH=PLAIN and SASL-IR, then authenticate
+as this user rather than the login user.
+
 =back
 
 =item B<Login Options>
@@ -574,6 +585,7 @@ sub new {
   $Self->{UseBlocking} = $Args{UseBlocking};
   $Self->{Pedantic} = $Args{Pedantic};
   $Self->{PreserveINBOX} = $Args{PreserveINBOX};
+  $Self->{UseCompress} = $Args{UseCompress};
 
   # Do this now, so we trace greeting line as well
   $Self->set_tracing($AlwaysTrace);
@@ -597,7 +609,7 @@ sub new {
   # Login first if specified
   if ($Args{Username}) {
     # If login fails, just return undef
-    $Self->login(@Args{'Username', 'Password'}) || return undef;
+    $Self->login(@Args{'Username', 'Password', 'AuthzUser'}) || return undef;
   }
 
   # Set root folder and separator (if supplied)
@@ -626,15 +638,36 @@ contact me (see details below).
 =cut
 sub login {
   my $Self = shift;
-  my ($User, $Pwd) = @_;
+  my ($User, $Pwd, $AuthzUser) = @_;
   my $PwdArr = { 'Quote' => $Pwd };
 
   # Clear cached capability responses and the like
   delete $Self->{Cache};
 
-  # Call standard command. Return undef if login failed
-  $Self->_imap_cmd("login", 0, "", $User, $PwdArr)
-    || return undef;
+  if (not $AuthzUser and $Self->_require_capability('auth=login')) {
+    # Call standard command. Return undef if login failed
+    $Self->_imap_cmd("login", 0, "", $User, $PwdArr)
+      || return undef;
+  }
+  elsif ($Self->_require_capability('auth=plain') and $Self->_require_capability('sasl-ir')) {
+    require MIME::Base64;
+    my $sasl = MIME::Base64::encode_base64(($AuthzUser || '') . "\0$User\0$Pwd", '');
+    $Self->_imap_cmd("authenticate", 0, "", 'plain', $sasl)
+      || return undef;
+  }
+  else {
+    die "No known authentication method supported";
+  }
+
+  if ($Self->{UseCompress} && $Self->_require_capability('compress=deflate') && require 'Compress/Zlib.pm') {
+    if ($Self->_imap_cmd("compress", 0, "", "deflate")) {
+      my $error;
+      ($Self->{CompressDeflate}, $error) = Compress::Zlib::deflateInit(-WindowBits => -Compress::Zlib::MAX_WBITS());
+      die "FAILED TO INIT DEFLATE $error" if $error;
+      ($Self->{CompressInflate}, $error) = Compress::Zlib::inflateInit(-WindowBits => -Compress::Zlib::MAX_WBITS());
+      die "FAILED TO INIT INFLATE $error" if $error;
+    }
+  }
 
   # Set to authenticated if successful
   $Self->state(Authenticated);
@@ -803,6 +836,8 @@ sub is_open {
         if $Self->{Trace};
       $Self->{Socket}->close() if $Self->{Socket};
       $Self->{Socket} = undef;
+      delete $Self->{CompressInflate};
+      delete $Self->{CompressDeflate};
       $Self->state(Unconnected);
       return undef;
     }
@@ -821,6 +856,8 @@ sub is_open {
         if $Self->{Trace};
       $Self->{Socket}->close();
       $Self->{Socket} = undef;
+      delete $Self->{CompressInflate};
+      delete $Self->{CompressDeflate};
       $Self->state(Unconnected);
       return undef;
     }
@@ -975,6 +1012,8 @@ sub release_socket {
   # Delete any knowledge of the socket in our instance
   delete $Self->{Socket};
   delete $Self->{Select};
+  delete $Self->{CompressInflate};
+  delete $Self->{CompressDeflate};
 
   $Self->_trace("A: Release socket, fileno=" . fileno($Socket) . "\n")
     if $Self->{Trace};
@@ -3694,7 +3733,7 @@ sub _send_data {
         if (!$IsFile) {
           $Self->_imap_socket_out(ref($Arg) ? $$Arg : $Arg);
         } else {
-          $Self->_copy_handle_to_handle($Arg, $Self->{Socket}, $LiteralSize);
+          $Self->_copy_handle_to_imap_socket($Arg, $LiteralSize);
         }
 
       # If no "+ go ahead" response, stick back in read buffer and fall out
@@ -4294,6 +4333,12 @@ sub _fill_imap_read_buffer {
     die "IMAPTalk: IMAP Connection closed by other end: $!";
   }
 
+  if ($Self->{CompressInflate}) {
+    my ($data, $error) = $Self->{CompressInflate}->inflate($Buffer);
+    die "FAILED TO INFLATE $error ($Buffer)" if $error;
+    $Buffer = $data;
+  }
+
   # Store in read buffer
   $Self->{ReadBuf} .= $Buffer;
 
@@ -4353,6 +4398,21 @@ sub _imap_socket_out {
   # Do tracing
   $Self->_trace("C: " . $_[0]) if $Self->{Trace};
 
+  if ($Self->{CompressDeflate}) {
+    my ($bytes, $error) = $Self->{CompressDeflate}->deflate($_[0]);
+    die "FAILED TO DEFLATE $error" if $error;
+    $Self->_imap_socket_write_bytes($bytes);
+  }
+  else {
+    $Self->_imap_socket_write_bytes($_[0]);
+  }
+
+  $Self->_imap_socket_flush();
+}
+
+sub _imap_socket_write_bytes {
+  my $Self = shift;
+
   # Keep track of bytes written and total number to write
   my ($WCount, $TCount) = (0, length($_[0]));
 
@@ -4368,46 +4428,40 @@ sub _imap_socket_out {
     }
     $WCount += $NWrite;
   }
+
   return 1;
 }
 
-=item I<_copy_handle_to_handle($Self, $InHandle $OutHandle, $NBytes)>
-
-Copy a given number of bytes from one handle to another.
-
-The number of bytes specified ($NBytes) must be available on the IMAP socket,
-otherwise the function will 'die' with an error if it runs out of data.
-
-If $NBytes is not specified (undef), the function will attempt to
-seek to the end of the file to find the size of the file.
- 
-=cut
-sub _copy_handle_to_handle {
-  my ($Self, $InHandle, $OutHandle, $NBytes) = @_;
-
-  # If NBytes undef, seek to end to find total length
-  if (!defined $NBytes) {
-    seek($InHandle, 0, 2); # SEEK_END
-    $NBytes = tell($InHandle);
-    seek($InHandle, 0, 0); # SEEK_SET
+sub _imap_socket_flush {
+  my $Self = shift;
+  if ($Self->{CompressDeflate}) {
+    my ($bytes, $error) = $Self->{CompressDeflate}->flush(Compress::Zlib::Z_FULL_FLUSH());
+    die "FAILED TO FLUSH $error" if $error;
+    $Self->_imap_socket_write_bytes($bytes) if $bytes ne '';
   }
+}
+
+=item I<_copy_handle_to_imapsocket($Self, $InHandle)>
+
+Copy a given number of bytes from a file handle to the IMAP connection
+
+=cut
+sub _copy_handle_to_imap_socket {
+  my ($Self, $InHandle) = @_;
 
   # Loop over in handle reading chunks at a time and writing to the out handle
   my $Val;
-  while (my $NRead = $InHandle->read($Val, 8192)) {
-    if (!defined $NRead) {
-      die 'IMAPTalk: Error reading data from io handle.' . $!;
+  while ($InHandle->read($Val, 8192)) {
+    if ($Self->{CompressDeflate}) {
+      my ($bytes, $error) = $Self->{CompressDeflate}->deflate($Val);
+      die "FAILED TO DEFLATE $error" if $error;
+      $Self->_imap_socket_write_bytes($bytes);
     }
-
-    my $NWritten = 0;
-    while ($NWritten != $NRead) {
-      my $NWrite = $OutHandle->syswrite($Val, $NRead-$NWritten, $NWritten);
-      if (!defined $NWrite) {
-        die 'IMAPTalk: Error writing data to io handle.' . $!;
-      }
-      $NWritten += $NWrite;
+    else {
+      $Self->_imap_socket_write_bytes($Val);
     }
   }
+  $Self->_imap_socket_flush();
 
   # Done
   return 1;
@@ -4416,7 +4470,7 @@ sub _copy_handle_to_handle {
 =item I<_copy_imap_socket_to_handle($Self, $OutHandle, $NBytes)>
 
 Copies data from the IMAP socket to a file handle. This is different
-to _copy_handle_to_handle() because we internally buffer the IMAP
+to _copy_handle_to_imap_socket() because we internally buffer the IMAP
 socket so we can't just use it to copy from the socket handle, we
 have to copy the contents of our buffer first.
 
@@ -5062,7 +5116,7 @@ documentation setup.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2003-2015 by FastMail Pty Ltd
+Copyright (C) 2003-2016 by FastMail Pty Ltd
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
