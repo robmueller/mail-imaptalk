@@ -1846,7 +1846,7 @@ Examples:
 sub getannotation {
   my $Self = shift;
   $Self->_require_capability('annotatemore') || return undef;
-  return $Self->_imap_cmd("getannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), { Quote => $_[0] }, { Quote => $_[1] });
+  return $Self->_imap_cmd("getannotation", 0, "annotation", $Self->_fix_folder_name(+shift, Wildcard => 1), { Quote => $_[0] }, { Quote => $_[1] });
 }
 
 =item I<getmetadata($FolderName, [ \%Options ], @Entries)>
@@ -1882,7 +1882,7 @@ sub getmetadata {
   $Self->_require_capability('metadata') || return undef;
 
   # First arg is folder name
-  my @Args = $Self->_fix_folder_name(+shift, 0);
+  my @Args = $Self->_fix_folder_name(+shift);
   # Next is optional hash of options
   push @Args, [%{ +shift }] if ref($_[0]) eq 'HASH';
 
@@ -1908,7 +1908,7 @@ sub multigetmetadata {
   # Send all commands at once
   my $FirstId = $Self->{CmdId};
   for (@FolderList) {
-    $Self->_send_cmd("getmetadata", $Self->_fix_folder_name($_, 1), { Quote => ref($Entries) ? $Entries : [ $Entries ] });
+    $Self->_send_cmd("getmetadata", $Self->_fix_folder_name($_, Wildcard => 1), { Quote => ref($Entries) ? $Entries : [ $Entries ] });
     $Self->{CmdId}++;
   }
 
@@ -1940,7 +1940,7 @@ Examples:
 sub setannotation {
   my $Self = shift;
   $Self->_require_capability('annotatemore') || return undef;
-  return $Self->_imap_cmd("setannotation", 0, "annotation", $Self->_fix_folder_name(+shift, 1), { Quote => $_[0] }, { Quote => $_[1] });
+  return $Self->_imap_cmd("setannotation", 0, "annotation", $Self->_fix_folder_name(+shift, Wildcard => 1), { Quote => $_[0] }, { Quote => $_[1] });
 }
 
 =item I<setmetadata($FolderName, $Name, $Value, $Name2, $Value2)>
@@ -1956,7 +1956,7 @@ Examples:
 sub setmetadata {
   my $Self = shift;
   $Self->_require_capability('metadata') || return undef;
-  return $Self->_imap_cmd("setmetadata", 0, "metadata", $Self->_fix_folder_name(+shift, 1), { Quote => [ @_ ] });
+  return $Self->_imap_cmd("setmetadata", 0, "metadata", $Self->_fix_folder_name(+shift, Wildcard => 1), { Quote => [ @_ ] });
 }
 
 =item I<close()>
@@ -2930,11 +2930,13 @@ sub find_message {
       if ( !exists $MsgComponents{$UT} ) {
 
         # Don't treat html parts in a multipart/mixed as an
-        #  alternative representation unless the first part
+        #  alternative representation if not the first part
+        #  and text part already found
         if ( $ST eq 'html'
           && $Parent
           && $Parent->{'MIME-Subtype'} eq 'mixed'
-          && $Pos > 0 )
+          && $Pos > 0
+          && $MsgComponents{text})
         {
         }
         else {
@@ -4570,26 +4572,26 @@ sub _find_arg {
   }
 }
 
-=item I<_fix_folder_name($FolderName, $WildCard)>
+=item I<_fix_folder_name($FolderName, %Opts)>
 
 Changes a folder name based on the current root folder prefix as set
 with the C<set_root_prefix()> call.
 
-If $WildCard is true, then a folder name with % or *
-is left alone.
+  Wildcard => 1 = a folder name with % or * is left alone
+  NoEncoding => 1 = don't do modified utf-7 encoding, leave as unicode
 
 =cut
 sub _fix_folder_name {
-  my ($Self, $FolderName, $WildCard) = @_;
+  my ($Self, $FolderName, %Opts) = @_;
 
   return '' if $FolderName eq '';
 
   # Map nicer looking Inbox to canonical INBOX
   return 'INBOX' if ($FolderName eq 'Inbox' and not $Self->{PreserveINBOX});
 
-  $FolderName = $Self->_fix_folder_encoding($FolderName);
+  $FolderName = $Self->_fix_folder_encoding($FolderName) unless $Opts{NoEncoding};
 
-  return $FolderName if $WildCard && $FolderName =~ /[\*\%]/;
+  return $FolderName if $Opts{Wildcard} && $FolderName =~ /[\*\%]/;
 
   my $RootFolderMatch = $Self->{RootFolderMatch}
     || return $FolderName;
