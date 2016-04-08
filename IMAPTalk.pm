@@ -441,11 +441,6 @@ If you have the Compress::Zlib package installed, and the server
 supports compress, then setting this flag to true will cause
 compression to be enabled immediately after login.
 
-=item B<AuthzUser>
-
-If the server supports AUTH=PLAIN and SASL-IR, then authenticate
-as this user rather than the login user.
-
 =back
 
 =item B<Login Options>
@@ -466,7 +461,14 @@ method described below.
 
 The password to use to login to the account.
 
+=item B<AuthzUser>
+
+If the server supports AUTH=PLAIN and SASL-IR, then authenticate
+as this user rather than the login user.
+
 =back
+
+See the C<login> method for more information.
 
 =item B<IMAP message/folder options>
 
@@ -627,13 +629,17 @@ sub new {
 =over 4
 =cut
 
-=item I<login($UnqName, $Password)>
+=item I<login($UnqName, $Password, [$AuthzUser])>
 
 Attempt to login user specified username and password.
 
-Currently there is only plain text password login support. If someone can
-give me a hand implementing others (like DIGEST-MD5, CRAM-MD5, etc) please
-contact me (see details below).
+If C<$AuthzUser> is supplied, an IMAP C<AUTHENTICATE> command will be performed
+to login on behalf of that user.  behalf of that user. This currently requires
+that the server supports C<AUTH=PLAIN> and C<SASL-IR>; support for other
+mechanisms (or integration of L<Authen::SASL>) would be gladly accepted.
+
+If C<$AuthzUser> is not supplied, a regular IMAP C<LOGIN> command will be
+performed.
 
 =cut
 sub login {
@@ -644,7 +650,8 @@ sub login {
   # Clear cached capability responses and the like
   delete $Self->{Cache};
 
-  if (not $AuthzUser and $Self->_require_capability('auth=login')) {
+  # Not authz on behalf of user, so just regular login
+  if (not $AuthzUser) {
     # Call standard command. Return undef if login failed
     $Self->_imap_cmd("login", 0, "", $User, $PwdArr)
       || return undef;
