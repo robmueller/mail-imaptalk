@@ -347,7 +347,8 @@ use constant LBLEN => length(LB);
 # Regexps used to determine if header is MIME encoded (we remove . from
 #  especials because of dumb ANSI_X3.4-1968 encoding)
 my $RFC2047Token = qr/[^\x00-\x1f\(\)\<\>\@\,\;\:\"\/\[\]\?\=\ ]+/;
-my $NeedDecodeUTF8Regexp = qr/=\?$RFC2047Token\?$RFC2047Token\?[^\?]*\?=/;
+my $RFC2047Encoded = qr/=\?$RFC2047Token\?$RFC2047Token\?[^\?]*\?=/;
+my $UTF8Encoded = qr/[\x80-\xff]/; # Well, could be anything with high bits, assume utf-8
 
 # Known untagged responses
 my %UntaggedResponses = map { $_ => 1 } qw(exists expunge recent);
@@ -2549,7 +2550,7 @@ sub xconvmeta {
         if (lc($Item) eq 'senders') {
           $ResHash{senders} = [
             map {
-              _decode_utf8($_->[0]) if defined $_->[0];
+              _decode_utf8($_->[0]);
               {
                name => $_->[0],
                email => "$_->[2]\@$_->[3]",
@@ -4754,7 +4755,7 @@ sub _parse_email_address {
     if (defined $Adr->[0] and $Adr->[0] ne '') {
       # CRLF's are folding that's leaked into data where it shouldn't, strip them
       $Adr->[0] =~ s/\r?\n//g;
-      _decode_utf8($Adr->[0]) if $DecodeUTF8 && $Adr->[0] =~ $NeedDecodeUTF8Regexp;
+      _decode_utf8($Adr->[0]) if $DecodeUTF8;
       # Strip any existing " and \ chars
       $Adr->[0] =~ s/["\\]//g;
       $EmailStr = '"' . $Adr->[0] . '"' . ($EmailStr ? ' <' . $EmailStr . '>' : '');
@@ -4796,7 +4797,7 @@ sub _parse_envelope {
   scalar(@$Env) == 10
     || die "IMAPTalk: Wrong number of fields in envelope structure " . Dumper($Env);
 
-  _decode_utf8($Env->[1]) if $DecodeUTF8 && defined($Env->[1]) && $Env->[1] =~ $NeedDecodeUTF8Regexp;
+  _decode_utf8($Env->[1]) if $DecodeUTF8;
 
   # Setup hash directly from envelope structure
   my %Res = (
@@ -5020,15 +5021,22 @@ sub _parse_header_result {
 
 =item I<_decode_utf8($Value)>
 
-Decodes the passed quoted printable value to a Perl UTF8 string.
+Decodes the passed quoted printable value to a Perl Unicode string.
 
 =cut
 sub _decode_utf8 {
-  # Fix dumb, dumb ANSI_X3.4-1968 encoding. It's not actually a valid
-  #  charset according to RFC2047, "." is an especial, so Encode ignores it
-  # See http://en.wikipedia.org/wiki/ASCII for other aliases
-  $_[0] =~ s/=\?ANSI_X3\.4-(?:1968|1986)\?/=?US-ASCII?/gi;
-  eval { $_[0] = decode('MIME-Header', $_[0]); };
+  for (@_) {
+    next if !defined $_;
+    if (/$RFC2047Encoded/) {
+      # Fix dumb, dumb ANSI_X3.4-1968 encoding. It's not actually a valid
+      #  charset according to RFC2047, "." is an especial, so Encode ignores it
+      # See http://en.wikipedia.org/wiki/ASCII for other aliases
+      s/=\?ANSI_X3\.4-(?:1968|1986)\?/=?US-ASCII?/gi;
+      eval { $_ = decode('MIME-Header', $_) };
+    } elsif (/$UTF8Encoded/) {
+      eval { $_ = decode_utf8($_) };
+    }
+  }
 }
 
 sub _read_int_list {
