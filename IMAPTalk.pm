@@ -108,7 +108,7 @@ sub import {
 
   if (delete($Parameters{':utf8support'})) {
     if (!$AlreadyLoadedEncode) {
-      eval "use Encode qw(decode decode_utf8);";
+      eval "use Encode qw(decode);";
       $AlreadyLoadedEncode = 1;
     }
   }
@@ -5034,7 +5034,8 @@ sub _decode_utf8 {
       s/=\?ANSI_X3\.4-(?:1968|1986)\?/=?US-ASCII?/gi;
       eval { $_ = decode('MIME-Header', $_) };
     } elsif (/$UTF8Encoded/) {
-      eval { $_ = decode_utf8($_) };
+      # Use stricter "utf-8" decoding so we don't end up with invalid unicode code points
+      eval { $_ = decode("utf-8", $_) };
     }
   }
 }
