@@ -2739,7 +2739,7 @@ sub xsnippets {
       push @Folders, [ $FolderName, $UidValidity ];
       $FolderMap{$FolderName} = $FolderIndex;
     }
-    eval { $Snippet = decode_utf8($Snippet) };
+    eval { $Snippet = decode("utf-8", $Snippet) };
     $Snippet =~ s/\x{fffd}//g; # Remove any bogus replacement chars, ugly display
     push @Snippets, [ $FolderMap{$FolderName}, int($Uid), $Location, $Snippet ];
   });
