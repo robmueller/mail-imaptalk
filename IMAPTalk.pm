@@ -4590,6 +4590,9 @@ sub _fix_folder_name {
   # Map nicer looking Inbox to canonical INBOX
   return 'INBOX' if ($FolderName eq 'Inbox' and not $Self->{PreserveINBOX});
 
+  # Handle select of special-use folder (cyrus feature)
+  return $FolderName if $FolderName =~ m{^\\};
+
   $FolderName = $Self->_fix_folder_encoding($FolderName) unless $Opts{NoEncoding};
 
   return $FolderName if $Opts{Wildcard} && $FolderName =~ /[\*\%]/;
