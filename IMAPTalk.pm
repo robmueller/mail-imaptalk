@@ -109,6 +109,7 @@ sub import {
   if (delete($Parameters{':utf8support'})) {
     if (!$AlreadyLoadedEncode) {
       eval "use Encode qw(decode);";
+      eval "use Encode::Detect::Detector qw(detect);";
       $AlreadyLoadedEncode = 1;
     }
   }
@@ -348,7 +349,7 @@ use constant LBLEN => length(LB);
 #  especials because of dumb ANSI_X3.4-1968 encoding)
 my $RFC2047Token = qr/[^\x00-\x1f\(\)\<\>\@\,\;\:\"\/\[\]\?\=\ ]+/;
 my $RFC2047Encoded = qr/=\?$RFC2047Token\?$RFC2047Token\?[^\?]*\?=/;
-my $UTF8Encoded = qr/[\x80-\xff]/; # Well, could be anything with high bits, assume utf-8
+my $NonAsciiData = qr/[\x1b\x80-\xff]/; # Anything with high-bits or ESC
 
 # Known untagged responses
 my %UntaggedResponses = map { $_ => 1 } qw(exists expunge recent);
@@ -5036,9 +5037,10 @@ sub _decode_utf8 {
       # See http://en.wikipedia.org/wiki/ASCII for other aliases
       s/=\?ANSI_X3\.4-(?:1968|1986)\?/=?US-ASCII?/gi;
       eval { $_ = decode('MIME-Header', $_) };
-    } elsif (/$UTF8Encoded/) {
-      # Use stricter "utf-8" decoding so we don't end up with invalid unicode code points
-      eval { $_ = decode("utf-8", $_) };
+    } elsif (/$NonAsciiData/) {
+      # Try and guess
+      my $GuessedCharSet = eval { detect($_) } // "utf-8";
+      eval { $_ = decode($GuessedCharSet, $_) };
     }
   }
 }
