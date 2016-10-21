@@ -463,10 +463,10 @@ method described below.
 
 The password to use to login to the account.
 
-=item B<AuthzUser>
+=item B<AsUser>
 
-If the server supports AUTH=PLAIN and SASL-IR, then authenticate
-as this user rather than the login user.
+If the server supports it, access the server as this user rather than the
+authenticate user.
 
 =back
 
@@ -613,7 +613,7 @@ sub new {
   # Login first if specified
   if ($Args{Username}) {
     # If login fails, just return undef
-    $Self->login(@Args{'Username', 'Password', 'AuthzUser'}) || return undef;
+    $Self->login(@Args{'Username', 'Password', 'AsUser'}) || return undef;
   }
 
   # Set root folder and separator (if supplied)
@@ -631,22 +631,19 @@ sub new {
 =over 4
 =cut
 
-=item I<login($UnqName, $Password, [$AuthzUser])>
+=item I<login($User, $Password, [$AsUser])>
 
 Attempt to login user specified username and password.
 
-If C<$AuthzUser> is supplied, an IMAP C<AUTHENTICATE> command will be performed
-to login on behalf of that user.  behalf of that user. This currently requires
-that the server supports C<AUTH=PLAIN> and C<SASL-IR>; support for other
-mechanisms (or integration of L<Authen::SASL>) would be gladly accepted.
+The actual authentication may be done using the C<LOGIN> or C<AUTHENTICATE>
+commands, depending on what the server advertises support for.
 
-If C<$AuthzUser> is not supplied, a regular IMAP C<LOGIN> command will be
-performed.
+If C<$AsUser> is supplied, an attempt will be made to login on behalf of that user.
 
 =cut
 sub login {
   my $Self = shift;
-  my ($User, $Pwd, $AuthzUser) = @_;
+  my ($User, $Pwd, $AsUser) = @_;
   my $PwdArr = { 'Quote' => $Pwd };
 
   # Clear cached capability responses and the like
@@ -654,7 +651,7 @@ sub login {
 
   # If we don't to authenticate on behalf of a user and the server can support
   # the standard IMAP LOGIN command, then just use that
-  if (!$AuthzUser && !$Self->capability->{logindisabled}) {
+  if (!$AsUser && !$Self->capability->{logindisabled}) {
     $Self->_imap_cmd("login", 0, "", $User, $PwdArr)
       || return undef;
   }
@@ -672,7 +669,7 @@ sub login {
       callback  => {
         user     => $User,
         pass     => $Pwd,
-        authname => $AuthzUser,
+        authname => $AsUser,
       },
     );
 
