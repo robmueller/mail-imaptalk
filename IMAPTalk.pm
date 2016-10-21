@@ -652,20 +652,95 @@ sub login {
   # Clear cached capability responses and the like
   delete $Self->{Cache};
 
-  # Not authz on behalf of user, so just regular login
-  if (not $AuthzUser) {
-    # Call standard command. Return undef if login failed
+  # If we don't to authenticate on behalf of a user and the server can support
+  # the standard IMAP LOGIN command, then just use that
+  if (!$AuthzUser && !$Self->capability->{logindisabled}) {
     $Self->_imap_cmd("login", 0, "", $User, $PwdArr)
       || return undef;
   }
-  elsif ($Self->_require_capability('auth=plain') and $Self->_require_capability('sasl-ir')) {
-    require MIME::Base64;
-    my $sasl = MIME::Base64::encode_base64(($AuthzUser || '') . "\0$User\0$Pwd", '');
-    $Self->_imap_cmd("authenticate", 0, "", 'plain', $sasl)
-      || return undef;
-  }
+
+  # Otherwise we'll need to do a true SASL auth
   else {
-    die "No known authentication method supported";
+    require Authen::SASL;
+    require MIME::Base64;
+
+    my @Mechanisms = map { m/auth=(.+)/ ? uc $1 : () } keys %{$Self->capability};
+    my $SendFirst = $Self->capability->{'sasl-ir'};
+
+    my $SASL = Authen::SASL->new(
+      mechanism => join(' ', @Mechanisms),
+      callback  => {
+        user     => $User,
+        pass     => $Pwd,
+        authname => $AuthzUser,
+      },
+    );
+
+    my $SASLClient = eval { $SASL->client_new };
+    if ($@) {
+      die "IMAPTalk: Couldn't create SASL client: $@"
+    }
+    my $InitialResponse = $SASLClient->client_start;
+    unless (defined $InitialResponse) {
+      die "IMAPTalk: Couldn't start SASL handshake: ".$SASL->error;
+    }
+
+    my $PostCommand = sub {
+      $Self->{ReadLine} = undef;
+
+      if ($InitialResponse && !$SendFirst) {
+        # Need to send initial response (SASL-IR not available)
+
+        my $Resp = $Self->_next_atom();
+        if (!$Resp || $Resp ne '+') {
+          die "IMAPTalk: Did not get '+' response";
+        }
+
+        # Consume anything left on the wire. Shouldn't be necessary, but...
+        $Self->_remaining_atoms();
+
+        $Self->_imap_socket_out(MIME::Base64::encode_base64($InitialResponse, '') . LB);
+      }
+
+      while ($SASLClient->need_step) {
+
+        # The server response will either be '+ <challenge>' or '<tag> NO'. So
+        # we read the line and if its not a SASL challenge, we put the whole
+        # line back onto the buffer and bail, letting the normal command
+        # response handler deal with it.
+        my $Line = $Self->_imap_socket_read_line;
+        unless ($Line =~ m/^\+/) {
+          substr($Self->{ReadBuf}, 0, 0, $Line . LB);
+          $Self->{ReadLine} = undef;
+          last;
+        }
+
+        # It's a challenge line, put it on the regular line buffer so we can
+        # use the atom parser
+        $Self->{ReadLine} = $Line;
+
+        # Consume the leading '+'
+        $Self->_next_atom();
+
+        # A SASL challenge. Decode and take a step
+        my ($EncChallenge) = @{$Self->_remaining_atoms()};
+        my $Challenge = MIME::Base64::decode_base64($EncChallenge);
+
+        my $Response = $SASLClient->client_step($Challenge);
+        unless (defined $Response) {
+          die "IMAPTalk: Couldn't continue SASL handshake: ".$SASL->error;
+        }
+        $Self->_imap_socket_out(MIME::Base64::encode_base64($Response, '') . LB);
+      }
+    };
+
+    my %ParseMode = (PostCommand => $PostCommand);
+    $Self->_imap_cmd(
+      \%ParseMode, "authenticate", 0, '',
+      $SASLClient->mechanism,
+      ($SendFirst && $InitialResponse) ? MIME::Base64::encode_base64($InitialResponse, '') : ())
+
+      || return undef;
   }
 
   if ($Self->{UseCompress} && $Self->_require_capability('compress=deflate') && require 'Compress/Zlib.pm') {
