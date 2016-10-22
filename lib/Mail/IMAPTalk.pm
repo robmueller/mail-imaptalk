@@ -122,8 +122,6 @@ sub import {
 
   goto &Exporter::import;
 }
-
-our $VERSION = '4.03';
 # }}}
 
 # Use modules {{{

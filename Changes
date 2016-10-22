@@ -1,5 +1,7 @@
 Revision history for Perl extension Mail::IMAPTalk.
 
+{{$NEXT}}
+
 4.03  Wed Mar 23 11:50 2016
   - Bump version and update copyright
   - add AuthzUser to allow admin override login
