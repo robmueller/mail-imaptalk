@@ -1,6 +1,8 @@
 Revision history for Perl extension Mail::IMAPTalk.
 
 {{$NEXT}}
+
+4.04      2016-10-22 13:16:42+11:00 Australia/Melbourne
 - Fix authentication to non-SASL-IR servers
 - Use AUTHENTICATE for login when necessary
 - Improve handling of headers with high-bit-set octet
