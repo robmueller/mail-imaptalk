@@ -1,6 +1,11 @@
 Revision history for Perl extension Mail::IMAPTalk.
 
 {{$NEXT}}
+- Fix authentication to non-SASL-IR servers
+- Use AUTHENTICATE for login when necessary
+- Improve handling of headers with high-bit-set octet
+- Use correct UTF-8 decoder
+- Allow SELECT by SPECIAL-USE flag (Cyrus feature)
 
 4.03  Wed Mar 23 11:50 2016
   - Bump version and update copyright
