@@ -2983,16 +2983,17 @@ sub find_message {
 
     # Parts we want to treat as "text"
     my $IsInline = 0;
-    # Text component of type we understand that isn't an attachment or has a filename
+    # Text component of type we understand that isn't an attachment
     $IsInline = 1 if $MT eq 'text' &&
                      $KnownTextParts{$ST} &&
-                     $DT ne 'attachment' &&
-                     !$CD->{filename} &&
-                     !$CD->{'filename*'};
+                     $DT ne 'attachment';
     # Bah, PGP has application/octet-stream inside an application/pgp-encrypted part
     $IsInline = 1 if $MTT eq 'application/octet-stream' &&
                      $InsideEnc &&
                      $CD->{filename} =~ /encrypted/;
+    # If not the first part and has filename, assume attachment
+    $IsInline = 0 if $Pos > 0 &&
+                     ($CD->{filename} || $CD->{'filename*'});
 
     if ($IsInline) {
       # Map to just text or html type
