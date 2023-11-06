@@ -4588,7 +4588,7 @@ sub _fix_folder_name {
     return $FolderName if $Sub eq $RootFolder && !$Rest;
     return $FolderName if lc $Sub eq lc $RootFolder && $Sub ne $RootFolder;
     return $FolderName if !$AltRootRegexp;
-    return $FolderName if $Sub =~ /^(?:$AltRootRegexp)/;
+    return $FolderName if "$Sub$Separator" =~ /^(?:$AltRootRegexp)/;
   }
 
   return $RootFolder . $Separator . $FolderName;
@@ -4655,7 +4655,7 @@ sub _unfix_folder_name {
     return $FolderName if $Sub eq $RootFolder && !$Rest;
     return $FolderName if lc $Sub eq lc $RootFolder && $Sub ne $RootFolder;
     return $FolderName if !$AltRootRegexp;
-    return $FolderName if $Sub =~ /^(?:$AltRootRegexp)/;
+    return $FolderName if "$Sub$Separator" =~ /^(?:$AltRootRegexp)/;
   }
 
   return $Rest ? $Sub . $Separator . $Rest : $Sub;
