@@ -3877,7 +3877,7 @@ sub _parse_response {
       my $Line = $DataResp{remainder} = $Self->_remaining_line();
 
       # Extract items inside [...]
-      if ($Line =~ /\[(.*)\] ?(.*)$/) {
+      if ($Line =~ /^\[(.*)\] ?(.*)$/) {
         $Self->{ReadLine} = $1;
         $DataResp{remainder} = $2;
 
