@@ -723,6 +723,7 @@ sub authenticate {
     $@ = "IMAPTalk: Couldn't create SASL client (@Mechanisms): $@";
     return undef;
   }
+  $Self->{Cache}->{sasl_mechanism} = lc $SASL->mechanism;
   my $InitialResponse = $SASLClient->client_start;
   unless (defined $InitialResponse) {
     $@ = "IMAPTalk: Couldn't start SASL handshake (@Mechanisms): " . $SASL->error;
