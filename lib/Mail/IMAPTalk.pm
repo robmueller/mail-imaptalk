@@ -3920,7 +3920,7 @@ sub _parse_response {
         $DataResp{$Res1}->{$Name} = $StatusRes;
       }
 
-    } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace' || $Res1 eq 'myrights' || $Res1 eq 'vanished') {
+    } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace' || $Res1 eq 'myrights' || $Res1 eq 'vanished' || $Res1 eq 'id') {
       $DataResp{$Res1} = $Self->_remaining_atoms();
 
     } elsif ($Res1 eq 'xlist' || $Res1 eq 'list' || $Res1 eq 'lsub') {
