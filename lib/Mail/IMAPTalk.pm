@@ -1919,12 +1919,12 @@ sub multistatus {
   my ($Self, $Items, @FolderList) = @_;
 
   my %Resp;
+  $Items = ref($Items) ? $Self->_send_data({}, "", $Items) : " " . $Items;
 
   while (my @Batch = splice(@FolderList, 0, 64)) {
     # Send all commands at once
     my $CmdBuf = "";
     my $FirstId = $Self->{CmdId};
-    $Items = ref($Items) ? $Self->_send_data({}, "", $Items) : " " . $Items;
 
     for (@Batch) {
       $CmdBuf .= $Self->{CmdId}++ . " status " . ${_quote($Self->_fix_folder_name($_))} . $Items . LB;
