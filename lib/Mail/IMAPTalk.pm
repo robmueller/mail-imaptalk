@@ -1535,9 +1535,9 @@ sub select_with_state {
   return (undef, "Remote server did not return message count")
     unless defined $msgcount;
   return (undef, "Remote server did not return uidvalidity")
-    unless $uidvalidity;
+    unless defined $uidvalidity;
   return (undef, "Remote server did not return uidnext")
-    unless $uidnext;
+    unless defined $uidnext;
 
   return {
     messagecount => $msgcount,
