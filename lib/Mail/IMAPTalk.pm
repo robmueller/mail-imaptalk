@@ -4482,6 +4482,7 @@ sub _unfix_folder_name {
     return $FolderName if !$Sub;
     return $FolderName if $Sub eq $RootFolder && !$Rest;
     return $FolderName if lc $Sub eq lc $RootFolder && $Sub ne $RootFolder;
+    return $FolderName if !$AltRootRegexp;
     return $FolderName if $Sub =~ /^(?:$AltRootRegexp)/;
   }
 
