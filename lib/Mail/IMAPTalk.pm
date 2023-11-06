@@ -679,11 +679,13 @@ sub login {
 
     my $SASLClient = eval { $SASL->client_new };
     if ($@) {
-      die "IMAPTalk: Couldn't create SASL client: $@"
+      $@ = "IMAPTalk: Couldn't create SASL client (@Mechanisms): $@";
+      return undef;
     }
     my $InitialResponse = $SASLClient->client_start;
     unless (defined $InitialResponse) {
-      die "IMAPTalk: Couldn't start SASL handshake: ".$SASL->error;
+      $@ = "IMAPTalk: Couldn't start SASL handshake (@Mechanisms): " . $SASL->error;
+      return undef;
     }
 
     my $PostCommand = sub {
@@ -729,7 +731,8 @@ sub login {
 
         my $Response = $SASLClient->client_step($Challenge);
         unless (defined $Response) {
-          die "IMAPTalk: Couldn't continue SASL handshake: ".$SASL->error;
+          $@ = "IMAPTalk: Couldn't continue SASL handshake (@Mechanisms): " . $SASL->error;
+          return undef;
         }
         $Self->_imap_socket_out(MIME::Base64::encode_base64($Response, '') . LB);
       }
