@@ -2390,7 +2390,7 @@ easier to handle as an error condition.
 
 =cut
 sub fetch {
-  my $Self = shift;
+  my ($Self, $Ids, @Rest) = @_;
 
   my $ParseMode = ref($_[0]) eq 'HASH' ? shift : {};
 
@@ -2399,7 +2399,14 @@ sub fetch {
 
   # Clear any existing fetch responses and call the fetch command
   $Self->{Responses}->{fetch} = undef;
-  my $FetchRes = $Self->_imap_cmd($ParseMode, "fetch", 1, "fetch", _fix_message_ids(+shift), @_);
+  my $FetchRes = $Self->_imap_cmd(
+    $ParseMode,
+    "fetch",
+    1,
+    "fetch",
+    $Self->make_sequence_set($Ids),
+    @Rest,
+  );
 
   # Single message fetch with no data returns
   my $NoFetchData = ref($FetchRes) && !%$FetchRes;
@@ -2423,7 +2430,7 @@ to another.
 =cut
 sub copy {
   my $Self = shift;
-  my $Uids = _fix_message_ids(+shift);
+  my $Uids = $Self->make_sequence_set(+shift);
   my $FolderName = $Self->_fix_folder_name(+shift);
   $Self->cb_folder_changed($FolderName);
   return $Self->_imap_cmd("copy", 1, "", $Uids, $FolderName, @_);
@@ -2480,7 +2487,9 @@ Examples:
 
 =cut
 sub search {
-  return (+shift)->_imap_cmd("search", 1, "search", _fix_message_ids(+shift), @_);
+  my ($Self) = shift;
+
+  return $Self->_imap_cmd("search", 1, "search", $Self->make_sequence_set(+shift), @_);
 }
 
 =item I<store($MsgIdSet, $FlagOperation, $Flags)>
@@ -2497,7 +2506,7 @@ Examples:
 sub store {
   my $Self = shift;
   $Self->cb_folder_changed($Self->{CurrentFolder});
-  return $Self->_imap_cmd("store", 1, "fetch", _fix_message_ids(+shift), @_);
+  return $Self->_imap_cmd("store", 1, "fetch", $Self->make_sequence_set(+shift), @_);
 }
 
 =item I<expunge()>
@@ -2520,7 +2529,7 @@ Perform IMAP uid expunge command as per RFC 2359.
 sub uidexpunge {
   my $Self = shift;
   $Self->cb_folder_changed($Self->{CurrentFolder});
-  return $Self->_imap_cmd("uid expunge", 0, "", _fix_message_ids(+shift));
+  return $Self->_imap_cmd("uid expunge", 0, "", $Self->make_sequence_set(+shift));
 }
 
 =item I<sort($SortField, $CharSet, @SearchCriteria)>
@@ -2569,7 +2578,7 @@ sub fetch_flags {
   my $Self = shift;
 
   my $Cmd = $Self->{Uid} ? 'uid fetch' : 'fetch';
-  $Self->_send_cmd($Cmd, _fix_message_ids(+shift), '(flags)');
+  $Self->_send_cmd($Cmd, $Self->make_sequence_set(+shift), '(flags)');
 
   my $Tag = '';
   my ($MsgId, $Resp, %FetchRes);
@@ -2622,7 +2631,7 @@ sub fetch_meta {
   my $Self = shift;
 
   my $Cmd = $Self->{Uid} ? 'uid fetch' : 'fetch';
-  $Self->_send_cmd($Cmd, _fix_message_ids(+shift), '(' . join(" ", @_) . ')');
+  $Self->_send_cmd($Cmd, $Self->make_sequence_set(+shift), '(' . join(" ", @_) . ')');
 
   my $Tag = '';
   my ($MsgId, $Resp, %FetchRes);
@@ -2658,7 +2667,7 @@ sub fetch_meta {
 
 sub move {
   my $Self = shift;
-  my $Uids = _fix_message_ids(+shift);
+  my $Uids = $Self->make_sequence_set(+shift);
   my $FolderName = $Self->_fix_folder_name(+shift);
   $Self->cb_folder_changed($FolderName);
   return $Self->_imap_cmd("move", 1, "", $Uids, $FolderName, @_);
@@ -2666,7 +2675,7 @@ sub move {
 
 sub xmove {
   my $Self = shift;
-  my $Uids = _fix_message_ids(+shift);
+  my $Uids = $Self->make_sequence_set(+shift);
   my $FolderName = $Self->_fix_folder_name(+shift);
   $Self->cb_folder_changed($FolderName);
   return $Self->_imap_cmd("xmove", 1, "", $Uids, $FolderName, @_);
@@ -2693,12 +2702,12 @@ Run the xannotator command on the given message id's
 =cut
 sub xrunannotator {
   my $Self = shift;
-  return $Self->_imap_cmd("xrunannotator", 1, "fetch", _fix_message_ids(+shift), @_);
+  return $Self->_imap_cmd("xrunannotator", 1, "fetch", $Self->make_sequence_set(+shift), @_);
 }
 
 sub xwarmup {
   my $Self = shift;
-  $Self->_find_arg($_[1], 'uids', sub { $_ = _fix_message_ids($_) });
+  $Self->_find_arg($_[1], 'uids', sub { $_ = $Self->make_sequence_set($_) });
   return $Self->_imap_cmd("xwarmup", 0, "", $Self->_fix_folder_name(+shift), @_);
 }
 
@@ -3102,6 +3111,52 @@ sub obliterate {
   return 1;
 }
 
+=item I<make_sequence_set($MessageIds)>
+
+    my $SetSeq = $IMAP->make_sequence_set($Ids);
+
+This method returns a reference to a C<sequence-set> string suitable for use in
+IMAP commands.  A reference is returned instead of a string so that the
+result can be passed directly to IMAP-generating methods and the sequence set
+will not be quoted.  (This quoting is especially problematic when quoting a
+range like C<1:*>).
+
+=cut
+sub make_sequence_set {
+  my ($Self, $Item) = @_;
+
+  # If the item is an array reference, turn into a comma separated of items
+  if (ref $Item && ref $Item eq 'ARRAY') {
+    my @Src = sort { $a <=> $b } @$Item;
+    push @Src, 0; # end marker to make the logic below simpler
+    my @Dest;
+    my $Start;
+    my $Prev;
+    while (defined (my $Single = shift @Src)) {
+      if (defined $Prev and $Single == $Prev + 1) {
+        $Start = $Prev unless defined $Start;
+      }
+      else {
+        if (defined $Start) {
+          push @Dest, "$Start:$Prev";
+          $Start = undef;
+        }
+        elsif (defined $Prev) {
+          push @Dest, $Prev;
+        }
+      }
+      $Prev = $Single;
+    }
+    # Make scalar ref, so we don't quote
+    $Item = \join(',', @Dest);
+  }
+
+  # We don't want to quote 1:* because Cyrus won't like it.  But we probably
+  # don't want to quote *any* range, really, so we always return a reference.
+  $Item = \"$Item" unless ref $Item;
+  return $Item;
+}
+
 =back
 =cut
 
@@ -3441,7 +3496,7 @@ Would have the result:
       }
     }
   }
-         
+
 =cut
 
 =head1 INTERNAL METHODS
@@ -4091,7 +4146,7 @@ sub _next_atom {
         $$AtomRef = $CurAtom;
       }
     }
-    
+
     # Bracket? (be postel kind to extra spaces)
     elsif ($Line =~ m/\G\( */gc) {
       # Begin a new sub-array
@@ -4453,7 +4508,7 @@ have to copy the contents of our buffer first.
 
 The number of bytes specified must be available on the IMAP socket,
 if the function runs out of data it will 'die' with an error.
- 
+
 =cut
 sub _copy_imap_socket_to_handle {
   my ($Self, $OutHandle, $NBytes) = @_;
@@ -4482,12 +4537,12 @@ sub _copy_imap_socket_to_handle {
   # Done
   return 1;
 }
-  
+
 =item I<_quote($String)>
 
 Returns an IMAP quoted version of a string. This place "..." around the
 string, and replaces any internal " with \".
- 
+
 =cut
 sub _quote {
   # Replace " and \ with \" and \\ and surround with "..."
@@ -4661,70 +4716,6 @@ sub _unfix_folder_name {
   return $Rest ? $Sub . $Separator . $Rest : $Sub;
 }
 
-=item I<_fix_message_ids($MessageIds)>
-
-Used by IMAP commands to handle a number of different ways that message
-IDs can be specified.
-
-=item I<Method arguments>
-
-=over 4
-
-=item B<$MessageIds>
-
-String or array ref which specified the message IDs or UIDs.
-
-=back
-
-The $MessageIds parameter may take the following forms:
-
-=over 4
-
-=item B<array ref>
-
-Array is turned into a string of comma separated ID numbers.
-
-=item B<1:*>
-
-Normally a * would result in the message ID string being quoted.
-This ensure that such a range string is not quoted because some
-servers (e.g. cyrus) don't like.
-
-=back
-
-=cut
-sub _fix_message_ids {
-  my $Item = shift;
-  # If the item is an array reference, turn into a comma separated of items
-  if (ref($Item) eq 'ARRAY') {
-    my @Src = sort { $a <=> $b } @$Item;
-    push @Src, 0; # end marker to make the logic below simpler
-    my @Dest;
-    my $Start;
-    my $Prev;
-    while (defined (my $Single = shift @Src)) {
-      if (defined $Prev and $Single == $Prev + 1) {
-        $Start = $Prev unless defined $Start;
-      }
-      else {
-        if (defined $Start) {
-          push @Dest, "$Start:$Prev";
-          $Start = undef;
-        }
-        elsif (defined $Prev) {
-          push @Dest, $Prev;
-        }
-      }
-      $Prev = $Single;
-    }
-    # Make scalar ref, so we don't quote
-    $Item = \join(',', @Dest);
-  }
-  # If the item ends in a *, don't put "'s around it. This is
-  # a hack so "1:*" doesn't end up with quotes that cyrus doesn't like
-  $Item = \"$Item" if !ref($Item) && $Item =~ /\*$/;
-  return $Item;
-}
 
 =item I<_parse_email_address($EmailAddressList)>
 
@@ -4734,7 +4725,7 @@ from an IMAP fetch (envelope) call into a single RFC 822 email string
 finally return to the user.
 
 This is used to parse an envelope structure returned from a fetch call.
-  
+
 See the documentation section 'FETCH RESULTS' for more information.
 
 =cut
