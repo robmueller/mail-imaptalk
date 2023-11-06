@@ -281,6 +281,12 @@ string which specifies what to do with the value item of the hash.
 The string/data in the value is sent as an IMAP literal
 regardless of the actual data in the string/data.
 
+=item * 'Binary'
+
+The string/data in the value is sent as an IMAP literal8
+regardless of the actual data in the string/data.
+(see RFC 3516)
+
 =item * 'Quote'
 
 The string/data in the value is sent as an IMAP quoted string
@@ -3670,7 +3676,7 @@ sub _send_data {
 
   my ($AddSpace, $NextAddSpace) = (1, 1);
   foreach my $Arg (@Args) {
-    my ($IsQuote, $IsLiteral, $IsFile) = ($Opts->{Quote}, 0, 0);
+    my ($IsQuote, $IsLiteral, $IsFile, $IsBinary) = ($Opts->{Quote}, 0, 0, 0);
 
     # --- Determine value type and appropriate output
 
@@ -3690,6 +3696,9 @@ sub _send_data {
         } elsif (exists $Arg->{Literal}) {
           $IsLiteral = 1;
           $Arg = ref($Arg->{Literal}) ?  $Arg->{Literal} : \$Arg->{Literal};
+        } elsif (exists $Arg->{Binary}) {
+          $IsLiteral = $IsBinary = 1;
+          $Arg = ref($Arg->{Binary}) ?  $Arg->{Binary} : \$Arg->{Binary};
         } elsif (exists $Arg->{Raw}) {
           $AddSpace = !$Arg->{NoSpace};
           $NextAddSpace = !$Arg->{NoNextSpace};
@@ -3769,7 +3778,10 @@ sub _send_data {
       }
 
       # Add to line buffer and send
-      $LineBuffer .= ($AddSpace ? " " : "") . "{" . $LiteralSize . "}" . LB;
+      $LineBuffer .=
+        ($AddSpace ? " " : "") .
+        ($IsBinary ? "~" : "") .
+        "{" . $LiteralSize . "}" . LB;
       $Self->_imap_socket_out($LineBuffer);
 
       $LineBuffer = "";
