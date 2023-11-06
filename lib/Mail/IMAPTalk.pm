@@ -1482,6 +1482,70 @@ sub examine {
   return $_[0]->select($_[1], ReadOnly => 1);
 }
 
+=item I<select_with_state($FolderName)>
+
+Perform the standard IMAP 'select' command to select a folder.
+This returns hashref of uidnext, uidvalidity and messagecount when successful
+and an undef otherwise.
+
+=cut
+
+sub select_with_state {
+  my ($Self, $Folder, %Opts) = @_;
+
+  # We need UIDVALIDITY & UIDNEXT here to check for new messages, but different
+  #  servers have different problems
+  # * Most servers return UIDNEXT in an unsolicited response from SELECT
+  #   (but not all, e.g. courrier)
+  # * You can explicitly STATUS for these, but some servers return a bogus
+  #   result if the mailbox isn't selected (e.g. imap.mail.us-west-2.awsapps.com)
+  # * RFC3501 says "the STATUS command SHOULD NOT be used on the currently
+  #   selected mailbox", and some servers return a BAD error result if you do
+  # * And to top if off, some servers don't recognise lowercase versions
+  #   of the status items, so we always send them UPPERCASE
+
+  # Ensure we are not in a selected state.
+  $Self->unselect();
+
+  my $State = $Self->status($Folder, [qw(MESSAGES UIDVALIDITY UIDNEXT)]);
+  # Have seen some servers return a NO response followed by STATUS+OK,
+  #  which unfortunately ends up as a string result
+  if (!$State || ref $State ne 'HASH') {
+    my $Error = $State || $@;
+
+    return (undef, $Error);
+  }
+
+  # Just for sanity, make sure these are all cleared before select
+  #  because it may or may not return any of these
+  $Self->clear_response_code($_) for (qw(uidnext uidvalidity exists));
+
+  my $Res = $Self->select($Folder, %Opts);
+  return (undef, "Failed to select folder on IMAP server: $@") unless ($Res);
+
+  my $r_msgcount    = $Self->get_response_code('exists');
+  my $r_uidvalidity = $Self->get_response_code('uidvalidity');
+  my $r_uidnext     = $Self->get_response_code('uidnext');
+
+  # Prefer SELECT unsolicited response code versions if present
+  my $msgcount    = $r_msgcount    // $State->{messages};
+  my $uidvalidity = $r_uidvalidity // $State->{uidvalidity};
+  my $uidnext     = $r_uidnext     // $State->{uidnext};
+
+  return (undef, "Remote server did not return message count")
+    unless defined $msgcount;
+  return (undef, "Remote server did not return uidvalidity")
+    unless $uidvalidity;
+  return (undef, "Remote server did not return uidnext")
+    unless $uidnext;
+
+  return {
+    messagecount => $msgcount,
+    uidnext      => $uidnext,
+    uidvalidity  => $uidvalidity,
+  };
+}
+
 =item I<create($FolderName)>
 
 Perform the standard IMAP 'create' command to create a new folder.
