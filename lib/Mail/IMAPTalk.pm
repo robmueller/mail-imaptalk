@@ -1312,6 +1312,46 @@ sub unicode_folders {
   return $Self->{Cache}->{UnicodeFolders} || 0;
 }
 
+=item I<get_select_state()>
+
+Returns an opaque value that represents the current selected
+state and folder. You can call select, unselect, etc
+and then later call set_select_state(...) to return
+to the previous selected state.
+
+=cut
+sub get_select_state {
+  my $Self = shift;
+  return {
+    'state' => $Self->state,
+    current_folder => $Self->{CurrentFolder},
+    current_folder_mode => $Self->{CurrentFolderMode},
+  };
+}
+
+=item I<set_select_state($state)>
+
+Restores selected state to a value returned from get_select_state
+
+=cut
+sub set_select_state {
+  my ($Self, $State) = @_;
+
+  if ($State->{state} == Unconnected) {
+    return $Self->logout;
+  } elsif ($State->{state} == Authenticated) {
+    return $Self->state == Selected ? $Self->unselect : 1;
+  } elsif ($State->{state} == Selected) {
+    if ($State->{current_folder_mode} eq 'read-write') {
+      return $Self->select($State->{current_folder});
+    } elsif ($State->{current_folder_mode} eq 'read-only') {
+      return $Self->examine($State->{current_folder});
+    }
+  }
+  $@ = "Could not restore select state to $State->{state}";
+  return undef;
+}
+
 =back
 =cut
 
