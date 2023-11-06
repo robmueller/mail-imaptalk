@@ -3965,7 +3965,7 @@ If not, it sets the internal last error, $@ and returns undef.
 sub _require_capability {
   my ($Self, $Capability) = @_;
   my $Caps = $Self->capability() || {};
-  if (!exists $Caps->{$Capability}) {
+  if (!exists $Caps->{lc $Capability}) {
     $Self->{LastError} = $@ = "IMAP server has no $Capability capability";
     return undef;
   }
