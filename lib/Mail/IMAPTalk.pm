@@ -3852,7 +3852,7 @@ sub _parse_response {
 
       # Parse fetch response into perl structure
       my $Fetch;
-      if ($Res2 eq 'fetch') {
+      if ($Res2 eq 'fetch' || $Res2 eq 'uidfetch') {
         $Fetch = _parse_fetch_result($Self->_next_atom(), \%ParseMode);
       }
 
@@ -3869,6 +3869,11 @@ sub _parse_response {
         # Store the result in our response hash
         my $FetchRes = ($DataResp{fetch}->{$Res1} ||= {});
         %$FetchRes = (%$FetchRes, %$Fetch);
+      } elsif ($Res2 eq 'uidfetch') {
+        # number is a UID in this mode
+        # Store the result in our response hash
+        my $FetchRes = ($DataResp{fetch}->{$Res1} ||= {});
+        %$FetchRes = (%$FetchRes, %$Fetch, uid => $Res1);
 
       } else {
         # Don't know other response types, just store the atom
