@@ -685,6 +685,12 @@ sub login {
 
     my @Mechanisms = map { m/auth=(.+)/ ? uc $1 : () } keys %{$Self->capability};
 
+    # Only keep stuff we can handle (e.g. not GSSAPI, NTLM, etc)
+    my %KnownMechanisms = map { $_ => 1 } qw(PLAIN LOGIN DIGEST-MD5);
+    # LOGIN doesn't support authname
+    delete $KnownMechanisms{LOGIN} if $AsUser;
+    @Mechanisms = grep { $KnownMechanisms{uc $_} } @Mechanisms;
+
     my $SASL = Authen::SASL->new(
       mechanism => join(' ', @Mechanisms),
       callback  => {
