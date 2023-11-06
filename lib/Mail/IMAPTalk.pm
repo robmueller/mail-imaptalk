@@ -559,7 +559,7 @@ sub new {
     $SocketOpts{PeerHost} = $Self->{Server} = $Args{Server} || die "No Server name given";
     $SocketOpts{PeerPort} = $Self->{Port} = $Args{Port} || $DefaultPort;
 
-    $Socket = ${SocketClass}->new(%SocketOpts) || return undef;
+    $Socket = ($Args{NewSocketCB} || sub { shift->new(@_) })->($SocketClass, %SocketOpts) || return undef;
 
     # Force flushing after every write to the socket
     my $ofh = select($Socket); $| = 1; select ($ofh);
