@@ -657,9 +657,6 @@ sub login {
   my $Self = shift;
   my ($User, $Pwd, $AsUser) = @_;
 
-  # Clear cached capability responses and the like
-  delete $Self->{Cache};
-
   # In some cases, we need to use the AUTHENTICATE command instead
   #  of plain login
   my $UseAuthenticate;
@@ -797,6 +794,9 @@ sub authenticate {
 
 sub _post_auth {
   my $Self = shift;
+
+  # Clear any cached capability response
+  $Self->clear_response_code('capability');
 
   if ($Self->{UseCompress} && $Self->_require_capability('compress=deflate') && require 'Compress/Zlib.pm') {
     if ($Self->_imap_cmd("compress", 0, "", "deflate")) {
