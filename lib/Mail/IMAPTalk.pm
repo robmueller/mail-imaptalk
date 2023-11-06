@@ -3935,7 +3935,7 @@ sub _parse_response {
         $DataResp{$Res1}->{$Name} = $StatusRes;
       }
 
-    } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace' || $Res1 eq 'myrights') {
+    } elsif ($Res1 eq 'flags' || $Res1 eq 'thread' || $Res1 eq 'namespace' || $Res1 eq 'myrights' || $Res1 eq 'vanished') {
       $DataResp{$Res1} = $Self->_remaining_atoms();
 
     } elsif ($Res1 eq 'xlist' || $Res1 eq 'list' || $Res1 eq 'lsub') {
@@ -3960,8 +3960,8 @@ sub _parse_response {
     } elsif ($Res1 eq 'capability' || $Res1 eq 'enabled') {
       $DataResp{$Res1} = { map { lc($_) => 1 } @{$Self->_remaining_atoms() || []} };
 
-    } elsif ($Res1 eq 'vanished') {
-      $DataResp{$Res1} = $Self->_remaining_atoms();
+    } elsif ($Res1 eq 'mailboxid') {
+      $DataResp{$Res1} = $Self->_next_atom();
 
     } elsif ($Res1 eq 'appenduid') {
       $DataResp{$Res1} = [ $Self->_next_atom(), $Self->_next_atom() ];
