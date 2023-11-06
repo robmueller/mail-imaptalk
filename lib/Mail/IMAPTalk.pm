@@ -656,104 +656,140 @@ If C<$AsUser> is supplied, an attempt will be made to login on behalf of that us
 sub login {
   my $Self = shift;
   my ($User, $Pwd, $AsUser) = @_;
-  my $PwdArr = { 'Quote' => $Pwd };
 
   # Clear cached capability responses and the like
   delete $Self->{Cache};
 
-  # If we don't to authenticate on behalf of a user and the server can support
-  # the standard IMAP LOGIN command, then just use that
-  if (!$AsUser && !$Self->capability->{logindisabled}) {
-    $Self->_imap_cmd("login", 0, "", $User, $PwdArr)
+  # In some cases, we need to use the AUTHENTICATE command instead
+  #  of plain login
+  my $UseAuthenticate;
+  $UseAuthenticate ||= $AsUser;
+  $UseAuthenticate ||= $Self->capability->{logindisabled};
+  # https://tools.ietf.org/html/rfc6855#section-5
+  # https://tools.ietf.org/html/rfc4422
+  $UseAuthenticate ||= $Pwd =~ /[^\x00-\x7f]/;
+
+  if (!$UseAuthenticate) {
+    $Self->_imap_cmd("login", 0, "", $User, { Quote => $Pwd })
       || return undef;
+
+    # Set to authenticated if successful
+    $Self->state(Authenticated);
+
+    return $Self->_post_auth()
   }
 
   # Otherwise we'll need to do a true SASL auth
   else {
     require Authen::SASL;
-    require MIME::Base64;
 
     my @Mechanisms = map { m/auth=(.+)/ ? uc $1 : () } keys %{$Self->capability};
-    my $SendFirst = $Self->capability->{'sasl-ir'};
 
     my $SASL = Authen::SASL->new(
       mechanism => join(' ', @Mechanisms),
       callback  => {
         user     => $User,
-        pass     => $Pwd,
+        pass     => Encode::encode_utf8($Pwd),
         authname => $AsUser,
       },
     );
 
-    my $SASLClient = eval { $SASL->client_new };
-    if ($@) {
-      $@ = "IMAPTalk: Couldn't create SASL client (@Mechanisms): $@";
-      return undef;
-    }
-    my $InitialResponse = $SASLClient->client_start;
-    unless (defined $InitialResponse) {
-      $@ = "IMAPTalk: Couldn't start SASL handshake (@Mechanisms): " . $SASL->error;
-      return undef;
-    }
-
-    my $PostCommand = sub {
-      $Self->{ReadLine} = undef;
-
-      if ($InitialResponse && !$SendFirst) {
-        # Need to send initial response (SASL-IR not available)
-
-        my $Resp = $Self->_next_atom();
-        if (!$Resp || $Resp ne '+') {
-          die "IMAPTalk: Did not get '+' response";
-        }
-
-        # Consume anything left on the wire. Shouldn't be necessary, but...
-        $Self->_remaining_atoms();
-
-        $Self->_imap_socket_out(MIME::Base64::encode_base64($InitialResponse, '') . LB);
-      }
-
-      while ($SASLClient->need_step) {
-
-        # The server response will either be '+ <challenge>' or '<tag> NO'. So
-        # we read the line and if its not a SASL challenge, we put the whole
-        # line back onto the buffer and bail, letting the normal command
-        # response handler deal with it.
-        my $Line = $Self->_imap_socket_read_line;
-        unless ($Line =~ m/^\+/) {
-          substr($Self->{ReadBuf}, 0, 0, $Line . LB);
-          $Self->{ReadLine} = undef;
-          last;
-        }
-
-        # It's a challenge line, put it on the regular line buffer so we can
-        # use the atom parser
-        $Self->{ReadLine} = $Line;
-
-        # Consume the leading '+'
-        $Self->_next_atom();
-
-        # A SASL challenge. Decode and take a step
-        my ($EncChallenge) = @{$Self->_remaining_atoms()};
-        my $Challenge = MIME::Base64::decode_base64($EncChallenge);
-
-        my $Response = $SASLClient->client_step($Challenge);
-        unless (defined $Response) {
-          $@ = "IMAPTalk: Couldn't continue SASL handshake (@Mechanisms): " . $SASL->error;
-          return undef;
-        }
-        $Self->_imap_socket_out(MIME::Base64::encode_base64($Response, '') . LB);
-      }
-    };
-
-    my %ParseMode = (PostCommand => $PostCommand);
-    $Self->_imap_cmd(
-      \%ParseMode, "authenticate", 0, '',
-      $SASLClient->mechanism,
-      ($SendFirst && $InitialResponse) ? MIME::Base64::encode_base64($InitialResponse, '') : ())
-
-      || return undef;
+    return $Self->authenticate($SASL);
   }
+}
+
+=item I<authenticate($Sasl)>
+
+Attempt to authenticate using the given Authen::SASL object
+
+=cut
+sub authenticate {
+  my ($Self, $SASL) = @_;
+
+  require MIME::Base64;
+
+  delete $Self->{Cache}->{sasl};
+  my @Mechanisms = map { m/auth=(.+)/ ? uc $1 : () } keys %{$Self->capability};
+  my $SendFirst = $Self->capability->{'sasl-ir'};
+
+  my $SASLClient = eval { $SASL->client_new('imap', $Self->{Server}) };
+  if ($@) {
+    $@ = "IMAPTalk: Couldn't create SASL client (@Mechanisms): $@";
+    return undef;
+  }
+  my $InitialResponse = $SASLClient->client_start;
+  unless (defined $InitialResponse) {
+    $@ = "IMAPTalk: Couldn't start SASL handshake (@Mechanisms): " . $SASL->error;
+    return undef;
+  }
+  my @NextResponse = $InitialResponse ? MIME::Base64::encode_base64($InitialResponse, '') : ();
+
+  # The AUTHENTICATE protocol is a bit messy because it changes the stream from
+  #  IMAP like (atoms, lists, literals, etc) to back/forth line based.
+  # We use _imap_cmd to send the command, but then use PostCommand to process
+  #  line by line until we resync back into IMAP mode when we fall out
+
+  my $PostCommand = sub {
+    # Force reading of a new line
+    $Self->{ReadLine} = undef;
+
+    while (1) {
+      my $Line = $Self->_imap_socket_read_line;
+
+      # Line started with a +, time to do a SASL client step
+      if ($Line =~ m{^\+\s*(\S*)}) {
+        my $Challenge = $1 ? MIME::Base64::decode_base64("$1") : "";
+
+        # If no saved step (e.g. client_start above and no sasl-ir), build a next step
+        if (!@NextResponse) {
+          my $Response = "";
+          if ($SASLClient->need_step) {
+            $Response = $SASLClient->client_step($Challenge);
+            unless (defined $Response) {
+              die "IMAPTalk: Couldn't continue SASL handshake (@Mechanisms): " . $SASL->error;
+            }
+          } else {
+            $Self->{Cache}->{sasl} = "Unexpected + challenge during SASL handshake (@Mechanisms): " . $Challenge;
+            # In this case, we send an empty line back to move back to IMAP parsing state
+          }
+
+          push @NextResponse, MIME::Base64::encode_base64($Response, '');
+        }
+
+        $Self->_imap_socket_out(shift(@NextResponse) . LB);
+
+      # Line didn't start with a +, assume it's an IMAP tagged response
+      } else {
+        if (@NextResponse) {
+          $Self->{Cache}->{sasl} = "Expected + during intial SASL handshake (@Mechanisms): " . $Line;
+        } elsif ($SASLClient->need_step) {
+          $Self->{Cache}->{sasl} = "IMAPTalk: Expected + during SASL handshake (@Mechanisms): " . $Line;
+        }
+
+        # Assume it's the tagged response line, add back to read buffer and fall
+        #  out to normal response processing loop
+        substr($Self->{ReadBuf}, 0, 0, $Line . LB);
+        $Self->{ReadLine} = undef;
+        last;
+      }
+    }
+  };
+
+  my %ParseMode = (PostCommand => $PostCommand);
+  $Self->_imap_cmd(
+    \%ParseMode, "authenticate", 0, '',
+    $SASLClient->mechanism,
+    $SendFirst ? splice @NextResponse : (),
+  ) || return undef;
+
+  # Set to authenticated if successful
+  $Self->state(Authenticated);
+
+  return $Self->_post_auth();
+}
+
+sub _post_auth {
+  my $Self = shift;
 
   if ($Self->{UseCompress} && $Self->_require_capability('compress=deflate') && require 'Compress/Zlib.pm') {
     if ($Self->_imap_cmd("compress", 0, "", "deflate")) {
@@ -775,9 +811,6 @@ sub login {
       $Self->{Cache}{LiteralPlus} = 2;
     }
   }
-
-  # Set to authenticated if successful
-  $Self->state(Authenticated);
 
   return 1;
 }
@@ -5085,6 +5118,54 @@ sub DESTROY {
 }
 
 =back
+=cut
+
+=head1 GMAIL, OFFICE 365, YAHOO and XOAUTH2
+
+GMail, Office 365 and Yahoo are all moving to OAUTH authentication using
+the XOAUTH2 SASL mechanism. At the moment, there doesn't appear to be
+a XOAUTH2 I<Authen::SASL> module on CPAN. If you need to authenticate
+with those systems, you should be able to use this simple module.
+
+  package Authen::SASL::Perl::XOAUTH2;
+
+  use strict;
+  use warnings
+  use parent qw(Authen::SASL::Perl);
+
+  sub _order { 1 }
+  sub _secflags { () }
+  sub mechanism { 'XOAUTH2' }
+
+  sub client_start {
+    my $self = shift;
+
+    $self->{error} = undef;
+    $self->{need_step} = 0;
+
+    my ($user, $auth, $access_token) = map {
+      my $v = $self->_call($_);
+      defined($v) ? $v : ''
+    } qw(user auth access_token);
+
+    return "user=$user\001auth=$auth $access_token\001\001";
+  }
+
+  1;
+
+And then authenticate using:
+
+  my $sasl = Authen::SASL->new(
+    mechanism => 'XOAUTH2',
+    callback => {
+      user => $username,
+      auth => 'Bearer',
+      access_token => $token,
+    }
+  );
+
+  $login_res = $connection->authenticate($sasl);
+
 =cut
 
 =head1 SEE ALSO
