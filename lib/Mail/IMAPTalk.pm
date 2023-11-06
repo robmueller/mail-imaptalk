@@ -4204,8 +4204,8 @@ sub _next_atom {
       }
     }
     
-    # Bracket?
-    elsif ($Line =~ m/\G\(/gc) {
+    # Bracket? (be postel kind to extra spaces)
+    elsif ($Line =~ m/\G\( */gc) {
       # Begin a new sub-array
       my $CurAtom = [];
       # Add to current atom. If there's a stack, must be within a bracket
