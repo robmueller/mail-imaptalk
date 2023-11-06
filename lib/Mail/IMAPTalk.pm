@@ -2835,8 +2835,9 @@ sub find_message {
   my (%MsgComponents);
 
   my %KnownTextParts = (
-    plain => 'text', text => 'text', enriched => 'text',
-    html => 'html',
+    plain => 'text',
+    text  => 'text',
+    html  => 'html',
     'application/octet-stream' => 'text'
   );
 
