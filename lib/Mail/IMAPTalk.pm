@@ -4374,6 +4374,7 @@ sub _fill_imap_read_buffer {
     return 1 if !$Append && length($Self->{ReadBuf});
   }
 
+  TryReadAgain:
   # Wait for data to become available, signals can interrupt
   # select() calls, so loop until definitely past $Timeout time
   my @ReadList;
@@ -4405,8 +4406,14 @@ sub _fill_imap_read_buffer {
   my $IsBlocking = $Self->{Socket}->blocking();
   $Self->{Socket}->blocking(0) if !$Blocking;
   my $BytesRead = $Self->{Socket}->sysread($Buffer, 16384);
+  my $WasEAGAIN = !$BytesRead && $!{EAGAIN};
   $Self->{Socket}->blocking($IsBlocking) if !$Blocking;
   CORE::select(undef, undef, undef, 0.25) if $Self->{go_slow};
+
+  # Some servers seem to return weird TCP packets that cause
+  #  select() to think there's data, but read() returns 0 bytes.
+  #  In that case, repeat the read attempt again
+  goto TryReadAgain if $WasEAGAIN;
 
   # The select told us there was data, if there wasn't
   # any, it means the other end closed the connection
