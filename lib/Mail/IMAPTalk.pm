@@ -1086,7 +1086,7 @@ sub release_socket {
   delete $Self->{CompressInflate};
   delete $Self->{CompressDeflate};
 
-  $Self->_trace("A: Release socket, fileno=" . fileno($Socket) . "\n")
+  $Self->_trace("A: Release socket, fileno=" . (eval { fileno($Socket) } // 'none') . "\n")
     if $Self->{Trace};
 
   # Set into no connection state
