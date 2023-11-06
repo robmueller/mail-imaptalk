@@ -611,6 +611,12 @@ sub new {
     $Self->{CmdId} = "*";
     my ($CompletionResp, $DataResp) = $Self->_parse_response('');
     return undef if $CompletionResp !~ /^ok/i;
+
+    # At this point, the cached "remainder" should be the banner greeting.  We'll
+    # save this into the ServerGreeting cache entry so we can refer to it later,
+    # if we want to.  This is fairly fragile, so may need reworking later.
+    # -- rjbs, 2023-08-11
+    $Self->{Cache}{ServerGreeting} = $Self->{Cache}{remainder};
   }
 
   # Start counter when sending commands
