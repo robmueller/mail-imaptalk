@@ -1017,21 +1017,41 @@ sub _set_separator {
   return $Self->set_root_folder($Self->{RootFolder}, $Separator, $Self->{AltRootRegexp});
 }
 
-=item I<literal_handle_control(optional $FileHandle)>
+=item I<literal_handle_control(optional $FileHandle or sub { })>
 
 Sets the mode whether to read literals as file handles or scalars.
 
-You should pass a filehandle here that any literal will be read into. To
-turn off literal reads into a file handle, pass a 0.
+There's three options here:
+  * undef/0 - always read literals into a scalar in memory
+  * filehandle - always read literals into the given filehandle
+     note: you'll need to make sure you're 'fetch' call only
+     returns a single literal, so you won't want to do
+     much more than ->fetch($uid, "rfc822")
+  * sub - whenever we parse an imap response and encounter a
+     literal, call this sub, and if it returns a filehandle read
+     into that filehandle, otherwise read into a scalar in memory
+
+If a sub is used, when called it's passed two arguments:
+  * bytes - the size of the literal in bytes
+  * previous atom - if parsing a list response, the previous
+     atom that was parsed. Useful when parsing "fetch" responses
+     since you get key/value type list in the fetch response
 
 Examples:
 
   # Read rfc822 text of message 3 into file
   # (note that the file will have /r/n line terminators)
-  open(F, ">messagebody.txt");
-  $IMAP->literal_handle_control(\*F);
+  open(my $fh, ">messagebody.txt");
+  $IMAP->literal_handle_control($fh);
   $IMAP->fetch(3, 'rfc822');
   $IMAP->literal_handle_control(0);
+
+  # Read the full rfc822 content into a filehandle, but the headers into a scalar
+  $IMAP->literal_handle_control(sub { lc $_[1] eq 'rfc822' ? scalar File::Temp::tempfile() : undef });
+  my $res = $IMAP->fetch(3, [ qw(rfc822 rfc822.header) ]);
+  $IMAP->literal_handle_control(0);
+  my $filehandle = $res->{3}->{rfc822};
+  my $hdrstxt = $res->{3}->{'rfc822.header'};
 
 =cut
 sub literal_handle_control {
@@ -4219,7 +4239,7 @@ sub _next_atom {
       $CurAtom = undef;
       if ($Self->{LiteralControl}) {
         if (ref($Self->{LiteralControl}) eq 'CODE') {
-          $CurAtom = $Self->{LiteralControl}->($Bytes);
+          $CurAtom = $Self->{LiteralControl}->($Bytes, @AtomStack ? (@$AtomRef ? $AtomRef->[-1] : undef) : $$AtomRef);
         } else {
           $CurAtom = $Self->{LiteralControl};
         }
