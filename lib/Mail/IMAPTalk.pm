@@ -3665,7 +3665,7 @@ sub _send_data {
           $IsQuote = 0;
           $Arg = $Arg->{Raw};
         } else {
-          die "Unknown hash arg type: " . (keys %$Arg)[0];
+          Carp::confess "Unknown hash arg type: " . (keys %$Arg)[0];
         }
       }
 
