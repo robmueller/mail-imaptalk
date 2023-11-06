@@ -504,6 +504,13 @@ Passed as the second parameter to the C<set_root_folder()> method.
 If supplied, passed along with RootFolder to the C<set_root_folder()>
 method.
 
+=item B<NoLiteralPlus>
+
+If set, this avoids ever sending literal+ non-synchronising literals.
+The default is off (false value).  Use this if you're dealing with a
+buggy server that doesn't handle literal+ correctly.  Also turns off
+RFC7888 "literal-" support.
+
 =back
 
 Examples:
@@ -594,6 +601,7 @@ sub new {
   $Self->{Pedantic} = $Args{Pedantic};
   $Self->{PreserveINBOX} = $Args{PreserveINBOX};
   $Self->{UseCompress} = $Args{UseCompress};
+  $Self->{NoLiteralPlus} = $Args{NoLiteralPlus};
 
   # Do this now, so we trace greeting line as well
   $Self->set_tracing($AlwaysTrace);
@@ -757,12 +765,15 @@ sub login {
     }
   }
 
-  if ($Self->_require_capability('literal+')) {
-    $Self->{Cache}{LiteralPlus} = 1;
-  }
+  unless ($Self->{NoLiteralPlus}) {
+    # see RFC7888 for the definition of literal+ and literal-.
+    if ($Self->_require_capability('literal+')) {
+      $Self->{Cache}{LiteralPlus} = 1;
+    }
 
-  if ($Self->_require_capability('literal-')) {
-    $Self->{Cache}{LiteralPlus} = 2;
+    if ($Self->_require_capability('literal-')) {
+      $Self->{Cache}{LiteralPlus} = 2;
+    }
   }
 
   # Set to authenticated if successful
@@ -3571,6 +3582,7 @@ sub _send_data {
       my $Plus = '';
       # enable Literal+ if it's supported
       if ($Self->{Cache}{LiteralPlus}) {
+        # see RFC7888 - literal- only supports < 4096 octet literals
         $Plus = '+' if ($Self->{Cache}{LiteralPlus} == 1 or $LiteralSize < 4096);
       }
       $LineBuffer .=
