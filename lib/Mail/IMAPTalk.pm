@@ -904,6 +904,7 @@ sub is_open {
 
     # See if there's any data to read
     local $Self->{Timeout} = 0;
+    local $Self->{UseBlocking} = 0;
 
     # If no sockets with data, must be blocked, so must be connected
     my $Atom = eval { $Self->_next_atom(); };
