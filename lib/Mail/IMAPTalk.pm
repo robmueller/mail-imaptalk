@@ -2390,9 +2390,9 @@ easier to handle as an error condition.
 
 =cut
 sub fetch {
-  my ($Self, $Ids, @Rest) = @_;
-
+  my $Self = shift;
   my $ParseMode = ref($_[0]) eq 'HASH' ? shift : {};
+  my ($Ids, @Rest) = @_;
 
   # Are we fetching one uid
   my $FetchOne = !ref($_[0]) && $_[0] =~ /^\d+$/ && $_[0];
