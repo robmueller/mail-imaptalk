@@ -1856,23 +1856,26 @@ response string (eg 'bad', 'no', etc)
 sub multistatus {
   my ($Self, $Items, @FolderList) = @_;
 
-  # Send all commands at once
-  my $CmdBuf = "";
-  my $FirstId = $Self->{CmdId};
-  $Items = ref($Items) ? $Self->_send_data({}, "", $Items) : " " . $Items;
-
-  for (@FolderList) {
-    $CmdBuf .= $Self->{CmdId}++ . " status " . ${_quote($Self->_fix_folder_name($_))} . $Items . LB;
-  }
-  $Self->_imap_socket_out($CmdBuf);
-
-  # Parse responses
   my %Resp;
-  $Self->{CmdId} = $FirstId;
-  for (@FolderList) {
-    my ($CompletionResp, $DataResp) = $Self->_parse_response("status");
-    $Resp{$_} = ref($DataResp) ? $DataResp : \$CompletionResp;
-    $Self->{CmdId}++;
+
+  while (my @Batch = splice(@FolderList, 0, 64)) {
+    # Send all commands at once
+    my $CmdBuf = "";
+    my $FirstId = $Self->{CmdId};
+    $Items = ref($Items) ? $Self->_send_data({}, "", $Items) : " " . $Items;
+
+    for (@Batch) {
+      $CmdBuf .= $Self->{CmdId}++ . " status " . ${_quote($Self->_fix_folder_name($_))} . $Items . LB;
+    }
+    $Self->_imap_socket_out($CmdBuf);
+
+    # Parse responses
+    $Self->{CmdId} = $FirstId;
+    for (@Batch) {
+      my ($CompletionResp, $DataResp) = $Self->_parse_response("status");
+      $Resp{$_} = ref($DataResp) ? $DataResp : \$CompletionResp;
+      $Self->{CmdId}++;
+    }
   }
 
   return \%Resp;
