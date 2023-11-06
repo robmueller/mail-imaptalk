@@ -993,41 +993,6 @@ sub set_root_folder {
   $Self->{AltRootRegexp} = $AltRootRegexp;
   $Self->{Separator} = $Separator;
 
-  # We map canonical IMAP INBOX to nicer looking Inbox,
-  #  but have to be careful if the root is INBOX as well
-
-  # INBOX             -> Inbox (done in _fix_folder_name)
-  # INBOX.blah        -> blah
-  # INBOX.inbox       -> INBOX.inbox
-  # INBOX.Inbox       -> INBOX.Inbox
-  # INBOX.inbox.inbox -> INBOX.inbox.inbox
-  # INBOX.Inbox.blah  -> Inbox.blah
-  # user.xyz          -> user.xyz
-
-  # RootFolderMatch
-  # If folder passed in doesn't match this, then prepend $RootFolder . $Separator
-  # eg prepend inbox. if folder !/^inbox(\.inbox)*$|^user$|^user\./
-
-  # UnrootFolderMatch
-  # If folder returned matches this, strip $RootFolder . $Separator
-  # eg strip inbox. if folder /^inbox\.(?!inbox(\.inbox)*)/
-
-  my ($RootFolderMatch, $UnrootFolderMatch);
-  if ($RootFolder) {
-    # Note the /i on the end to make this case-insensitive
-    $RootFolderMatch = qr/\Q${RootFolder}\E(?:\Q${Separator}${RootFolder}\E)*/i;
-    $UnrootFolderMatch = qr/^\Q${RootFolder}${Separator}\E(?!${RootFolderMatch}$)/;
-
-    if ($AltRootRegexp) {
-      $RootFolderMatch = qr/^${RootFolderMatch}$|^(?:${AltRootRegexp}(?:\Q${Separator}\E|$))/;
-    } else {
-      $RootFolderMatch = qr/^${RootFolderMatch}$/;
-    }
-  }
-
-  @$Self{qw(RootFolderMatch UnrootFolderMatch)}
-    = ($RootFolderMatch, $UnrootFolderMatch);
-
   return 1;
 }
 
@@ -2631,7 +2596,7 @@ sub xconvmeta {
         elsif (lc($Item) eq 'count') {
           my %FolderCount = @{$Res->{$Item}};
           $ResHash{count} = { map {
-             $Self->_unfix_folder_name($_) => int($FolderCount{$_})
+             $_ => int($FolderCount{$_})
           } keys %FolderCount };
         }
         elsif (lc($Item) eq 'folderexists') {
@@ -4667,7 +4632,7 @@ sub _fix_folder_name {
   return '' if $FolderName eq '';
 
   # Map nicer looking Inbox to canonical INBOX
-  return 'INBOX' if ($FolderName eq 'Inbox' and not $Self->{PreserveINBOX});
+  return $Self->{PreserveINBOX} ? 'INBOX' : $FolderName if lc $FolderName eq 'inbox';
 
   # Handle select of special-use folder (cyrus feature)
   return $FolderName if $FolderName =~ m{^\\};
@@ -4676,14 +4641,33 @@ sub _fix_folder_name {
 
   return $FolderName if $Opts{Wildcard} && $FolderName =~ /[\*\%]/;
 
-  my $RootFolderMatch = $Self->{RootFolderMatch}
-    || return $FolderName;
+  # INBOX             <- INBOX
+  # INBOX.blah        <- blah
+  # INBOX.blah.bar    <- blah.bar
+  # INBOX.INBOX       <- INBOX.INBOX
+  # INBOX.INBOX.blah  <- INBOX.blah
+  # INBOX.Inbox       <- INBOX.Inbox
+  # INBOX.Inbox.foo   <- INBOX.Inbox.foo
+  # INBOX.Inbox.inbox <- INBOX.Inbox.inbox
+  # user.xyz          <- user.xyz
+  # RESTORED.foo      <- RESTORED.foo
+  # INBOX.RESTORED.foo <- INBOX.RESTORED.foo
 
-  # If no root folder, just return passed in folder
-  return $FolderName if $FolderName =~ $RootFolderMatch;
+  my $AltRootRegexp = $Self->{AltRootRegexp};
+  return $FolderName if $AltRootRegexp && $FolderName =~ /^$AltRootRegexp/;
 
-  my ($RootFolder, $Separator) = @$Self{'RootFolder', 'Separator'};
-  return !$RootFolder ? $FolderName : $RootFolder . $Separator . $FolderName;
+  my $RootFolder = $Self->{RootFolder} || return $FolderName;
+  my $Separator = $Self->{Separator};
+
+  my ($Root, $Sub, $Rest) = split /\Q${Separator}\E/, $FolderName, 3;
+  if ($Root eq $RootFolder) {
+    return $FolderName if !$Sub;
+    return $FolderName if $Sub eq $RootFolder && !$Rest;
+    return $FolderName if lc $Sub eq lc $RootFolder && $Sub ne $RootFolder;
+    return $FolderName if $Sub =~ /^(?:$AltRootRegexp)/;
+  }
+
+  return $RootFolder . $Separator . $FolderName;
 }
 
 =item I<_fix_folder_encoding($FolderName)>
@@ -4712,19 +4696,44 @@ with the C<set_root_prefix()> call.
 sub _unfix_folder_name {
   my ($Self, $FolderName) = @_;
 
-  my $UFM = $Self->{UnrootFolderMatch};
-  $FolderName =~ s/^$UFM// if $UFM;
-
   # Map canonical INBOX to nicer looking Inbox
-  $FolderName = "Inbox" if ($FolderName eq "INBOX" && not $Self->{PreserveINBOX});
+  return $Self->{PreserveINBOX} ? $FolderName : "Inbox" if lc $FolderName eq 'inbox';
 
   my $UnicodeFolders = $Self->unicode_folders();
-  if ( $UnicodeFolders && ( $FolderName =~ m{&} ) )
-  {
+  if ($UnicodeFolders && $FolderName =~ m{&}) {
     $FolderName = Encode::decode( 'IMAP-UTF-7', $FolderName );
   }
 
-  return $FolderName;
+  # INBOX             -> INBOX
+  # INBOX.blah        -> blah
+  # INBOX.blah.bar    -> blah.bar
+  # INBOX.INBOX       -> INBOX.INBOX
+  # INBOX.INBOX.blah  -> INBOX.blah
+  # INBOX.Inbox       -> INBOX.Inbox
+  # INBOX.Inbox.foo   -> INBOX.Inbox.foo
+  # INBOX.Inbox.inbox -> INBOX.Inbox.inbox
+  # user.xyz          -> user.xyz
+  # RESTORED.foo      -> RESTORED.foo
+  # INBOX.RESTORED.foo -> INBOX.RESTORED.foo
+
+  my $AltRootRegexp = $Self->{AltRootRegexp};
+  return $FolderName if $AltRootRegexp && $FolderName =~ /^$AltRootRegexp/;
+
+  # Special case empty name (e.g. getmetadata for global data);
+  return $FolderName if $FolderName eq '';
+
+  my $RootFolder = $Self->{RootFolder} || return $FolderName;
+  my $Separator = $Self->{Separator};
+
+  my ($Root, $Sub, $Rest) = split /\Q${Separator}\E/, $FolderName, 3;
+  if ($Root eq $RootFolder) {
+    return $FolderName if !$Sub;
+    return $FolderName if $Sub eq $RootFolder && !$Rest;
+    return $FolderName if lc $Sub eq lc $RootFolder && $Sub ne $RootFolder;
+    return $FolderName if $Sub =~ /^(?:$AltRootRegexp)/;
+  }
+
+  return $Rest ? $Sub . $Separator . $Rest : $Sub;
 }
 
 =item I<_fix_message_ids($MessageIds)>
