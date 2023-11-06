@@ -757,6 +757,14 @@ sub login {
     }
   }
 
+  if ($Self->_require_capability('literal+')) {
+    $Self->{Cache}{LiteralPlus} = 1;
+  }
+
+  if ($Self->_require_capability('literal-')) {
+    $Self->{Cache}{LiteralPlus} = 2;
+  }
+
   # Set to authenticated if successful
   $Self->state(Authenticated);
 
@@ -3560,16 +3568,21 @@ sub _send_data {
       }
 
       # Add to line buffer and send
+      my $Plus = '';
+      # enable Literal+ if it's supported
+      if ($Self->{Cache}{LiteralPlus}) {
+        $Plus = '+' if ($Self->{Cache}{LiteralPlus} == 1 or $LiteralSize < 4096);
+      }
       $LineBuffer .=
         ($AddSpace ? " " : "") .
         ($IsBinary ? "~" : "") .
-        "{" . $LiteralSize . "}" . LB;
+        "{" . $LiteralSize . $Plus . "}" . LB;
       $Self->_imap_socket_out($LineBuffer);
 
       $LineBuffer = "";
 
-      # Wait for "+ go ahead" response
-      my $GoAhead = $Self->_imap_socket_read_line();
+      # Wait for "+ go ahead" response unless $Plus is set
+      my $GoAhead = $Plus eq '+' ? $Plus : $Self->_imap_socket_read_line();
       if ($GoAhead =~ /^\+/) {
         if (!$IsFile) {
           $Self->_imap_socket_out(ref($Arg) ? $$Arg : $Arg);
