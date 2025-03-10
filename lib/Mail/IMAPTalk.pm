@@ -1,4 +1,6 @@
 package Mail::IMAPTalk;
+use strict;
+use warnings;
 
 =head1 NAME
 
@@ -91,8 +93,8 @@ the given command.
 
 # Export {{{
 require Exporter;
-@ISA = qw(Exporter);
-%EXPORT_TAGS = (
+our @ISA = qw(Exporter);
+our %EXPORT_TAGS = (
   Default => [ qw(get_body_part find_message build_cid_map generate_cid) ]
 );
 Exporter::export_ok_tags('Default');
@@ -146,8 +148,6 @@ BEGIN {
 # Use Time::HiRes if available to handle select restarts
 eval 'use Time::HiRes qw(time);';
 
-use strict;
-use warnings;
 # }}}
 
 =head1 CLASS OVERVIEW
