@@ -1427,7 +1427,7 @@ sub set_select_state {
   if ($State->{state} == Unconnected) {
     return $Self->logout;
   } elsif ($State->{state} == Authenticated) {
-    return $Self->state == Selected ? $Self->unselect : 1;
+    return $Self->state == Selected ? $Self->unselect_or_close : 1;
   } elsif ($State->{state} == Selected) {
     if ($State->{current_folder_mode} eq 'read-write') {
       return $Self->select($State->{current_folder});
@@ -1460,8 +1460,8 @@ IMAP EXAMINE verb is used instead of SELECT.
 Mail::IMAPTalk will cache the currently selected folder, and if you
 issue another ->select("XYZ") for the folder that is already selected,
 it will just return immediately. This can confuse code that expects
-to get side effects of a select call. For that case, call ->unselect()
-first, then ->select().
+to get side effects of a select call. For that case, call ->unselect (or
+->unselect_or_close) first, then ->select.
 
 =cut
 sub select {
@@ -1471,7 +1471,7 @@ sub select {
   my $ReadOnly = delete($Opts{ReadOnly});
 
   if ($unselect) {
-    $Self->unselect();
+    $Self->unselect_or_close;
   }
 
   # Are we already selected and in the same mode?
@@ -1587,7 +1587,7 @@ sub select_with_state {
   #   of the status items, so we always send them UPPERCASE
 
   # Ensure we are not in a selected state.
-  $Self->unselect();
+  $Self->unselect_or_close;
 
   my $State = $Self->status($Folder, [qw(MESSAGES UIDVALIDITY UIDNEXT)]);
   # Have seen some servers return a NO response followed by STATUS+OK,
