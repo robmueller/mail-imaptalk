@@ -1536,6 +1536,23 @@ sub unselect {
   return $Res;
 }
 
+=item I<unselect_or_close()>
+
+Perform the IMAP "unselect" command if the capability is present in the server,
+otherwise perform the "close" command.
+
+=cut
+
+sub unselect_or_close {
+  my $Self = shift;
+
+  if ($Self->capability->{unselect}) {
+    return $Self->unselect;
+  }
+
+  return $Self->close;
+}
+
 =item I<examine($FolderName)>
 
 Perform the standard IMAP 'examine' command to select a folder in read only
