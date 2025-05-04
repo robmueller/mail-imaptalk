@@ -2512,6 +2512,15 @@ sub append {
   return $Self->_imap_cmd("append", 0, "", $FolderName, @_);
 }
 
+sub replace {
+  my ($Self, $Id, $FolderName, @Rest) = @_;
+
+  $FolderName = $Self->_fix_folder_name($FolderName);
+  $Self->cb_folder_changed($FolderName);
+
+  return $Self->_imap_cmd("replace", 1, "", $Id, $FolderName, @Rest);
+}
+
 =item I<search($MsgIdSet, @SearchCriteria)>
 
 Perform standard IMAP search command. The result is an array reference to a list
