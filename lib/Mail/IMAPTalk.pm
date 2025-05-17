@@ -5135,44 +5135,14 @@ sub DESTROY {
 =head1 GMAIL, OFFICE 365, YAHOO and XOAUTH2
 
 GMail, Office 365 and Yahoo are all moving to OAUTH authentication using
-the XOAUTH2 SASL mechanism. At the moment, there doesn't appear to be
-a XOAUTH2 I<Authen::SASL> module on CPAN. If you need to authenticate
-with those systems, you should be able to use this simple module.
-
-  package Authen::SASL::Perl::XOAUTH2;
-
-  use strict;
-  use warnings
-  use parent qw(Authen::SASL::Perl);
-
-  sub _order { 1 }
-  sub _secflags { () }
-  sub mechanism { 'XOAUTH2' }
-
-  sub client_start {
-    my $self = shift;
-
-    $self->{error} = undef;
-    $self->{need_step} = 0;
-
-    my ($user, $auth, $access_token) = map {
-      my $v = $self->_call($_);
-      defined($v) ? $v : ''
-    } qw(user auth access_token);
-
-    return "user=$user\001auth=$auth $access_token\001\001";
-  }
-
-  1;
-
-And then authenticate using:
+the XOAUTH2 SASL mechanism. If you need to authenticate with those systems
+you can authenticate using:
 
   my $sasl = Authen::SASL->new(
     mechanism => 'XOAUTH2',
     callback => {
       user => $username,
-      auth => 'Bearer',
-      access_token => $token,
+      pass => $token,
     }
   );
 
