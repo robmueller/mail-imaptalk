@@ -304,6 +304,8 @@ Examples:
     $IMAP->append("inbox", { Literal => $MsgTxt })
     # Append MSGFILE contents as new message
     $IMAP->append("inbox", \*MSGFILE ])
+    # Append $MsgTxt as UTF-8 string. Assumes UTF8=ACCEPT is enabled.
+    $IMAP->append("inbox", { LiteralUtf8 => $MsgTxt })
 
 =back
 
@@ -3645,7 +3647,8 @@ sub _send_data {
 
   my ($AddSpace, $NextAddSpace) = (1, 1);
   foreach my $Arg (@Args) {
-    my ($IsQuote, $IsLiteral, $IsFile, $IsBinary) = ($Opts->{Quote}, 0, 0, 0);
+    my ($IsQuote, $IsLiteral, $IsFile, $IsBinary, $IsUtf8) =
+      ($Opts->{Quote}, 0, 0, 0, 0);
 
     # --- Determine value type and appropriate output
 
@@ -3665,6 +3668,9 @@ sub _send_data {
         } elsif (exists $Arg->{Literal}) {
           $IsLiteral = 1;
           $Arg = ref($Arg->{Literal}) ?  $Arg->{Literal} : \$Arg->{Literal};
+        } elsif (exists $Arg->{LiteralUtf8}) {
+          $IsLiteral = $IsUtf8 = $IsBinary = 1;
+          $Arg = ref($Arg->{LiteralUtf8}) ?  $Arg->{LiteralUtf8} : \$Arg->{LiteralUtf8};
         } elsif (exists $Arg->{Binary}) {
           $IsLiteral = $IsBinary = 1;
           $Arg = ref($Arg->{Binary}) ?  $Arg->{Binary} : \$Arg->{Binary};
@@ -3755,6 +3761,7 @@ sub _send_data {
       }
       $LineBuffer .=
         ($AddSpace ? " " : "") .
+        ($IsUtf8 ? "UTF8 (" : "") .
         ($IsBinary ? "~" : "") .
         "{" . $LiteralSize . $Plus . "}" . LB;
       $Self->_imap_socket_out($LineBuffer);
@@ -3768,6 +3775,10 @@ sub _send_data {
           $Self->_imap_socket_out(ref($Arg) ? $$Arg : $Arg);
         } else {
           $Self->_copy_handle_to_imap_socket($Arg, $LiteralSize);
+        }
+
+        if ($IsUtf8) {
+          $Self->_imap_socket_out(")");
         }
 
       # If no "+ go ahead" response, stick back in read buffer and fall out
