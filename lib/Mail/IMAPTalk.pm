@@ -5143,12 +5143,25 @@ sub DESTROY {
 =back
 =cut
 
-=head1 GMAIL, OFFICE 365, YAHOO and XOAUTH2
+=head1 GMAIL, OFFICE 365, YAHOO and OAUTHBEARER/XOAUTH2
 
 GMail, Office 365 and Yahoo are all moving to OAUTH authentication using
-the XOAUTH2 SASL mechanism. At the moment, there doesn't appear to be
-a XOAUTH2 I<Authen::SASL> module on CPAN. If you need to authenticate
-with those systems, you should be able to use this simple module.
+the XOAUTH2 SASL mechanism. Authen::SASL 2.1800 and above support
+OAUTHBEARER and XOAUTH2 so if you have that version or greater you can
+just use:
+
+  my $sasl = Authen::SASL->new(
+    mechanism => 'XOAUTH2' / 'OAUTHBEARER',
+    callback => {
+      user => $username,
+      pass => $token,
+    }
+  );
+
+  $login_res = $connection->authenticate($sasl);
+
+If you have an older version, you can use the following simple
+module instead:
 
   package Authen::SASL::Perl::XOAUTH2;
 
@@ -5157,7 +5170,8 @@ with those systems, you should be able to use this simple module.
   use parent qw(Authen::SASL::Perl);
 
   sub _order { 1 }
-  sub _secflags { () }
+  my @FLAGS;
+  sub _secflags { @FLAGS }
   sub mechanism { 'XOAUTH2' }
 
   sub client_start {
@@ -5166,12 +5180,12 @@ with those systems, you should be able to use this simple module.
     $self->{error} = undef;
     $self->{need_step} = 0;
 
-    my ($user, $auth, $access_token) = map {
+    my ($user, $pass) = map {
       my $v = $self->_call($_);
       defined($v) ? $v : ''
-    } qw(user auth access_token);
+    } qw(user pass);
 
-    return "user=$user\001auth=$auth $access_token\001\001";
+    return "user=$user\001auth=Bearer $pass\001\001";
   }
 
   1;
@@ -5182,8 +5196,7 @@ And then authenticate using:
     mechanism => 'XOAUTH2',
     callback => {
       user => $username,
-      auth => 'Bearer',
-      access_token => $token,
+      pass => $token,
     }
   );
 
