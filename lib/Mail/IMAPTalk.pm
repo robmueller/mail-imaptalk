@@ -565,9 +565,10 @@ sub new {
     my $DefaultPort = 143;
     my $SocketClass = $DefSocketClass;
 
-    if (my $SSLOpt = $Args{UseSSL}) {
-      $SSLOpt = $SSLOpt eq '1' ? '' : " qw($SSLOpt)";
-      eval "use IO::Socket::SSL$SSLOpt; 1;" || return undef;
+    my $SSLOpt = $Args{UseSSL};
+    if ($SSLOpt) {
+      my $SSLUse = $SSLOpt eq '1' ? '' : " qw($SSLOpt)";
+      eval "use IO::Socket::SSL$SSLUse; 1;" || return undef;
       $SocketClass = "IO::Socket::SSL";
       $DefaultPort = 993;
       $SocketOpts{$_} = $Args{$_} for grep { /^SSL_/ } keys %Args;
@@ -576,7 +577,18 @@ sub new {
     $SocketOpts{PeerHost} = $Self->{Server} = $Args{Server} || die "No Server name given";
     $SocketOpts{PeerPort} = $Self->{Port} = $Args{Port} || $DefaultPort;
 
-    $Socket = ($Args{NewSocketCB} || sub { shift->new(@_) })->($SocketClass, %SocketOpts) || return undef;
+    # Clear any errors before creating the socket
+    $! = 0;
+    $@ = "";
+
+    $Socket = ($Args{NewSocketCB} || sub { shift->new(@_) })->($SocketClass, %SocketOpts);
+    if (!$Socket) {
+      # Divine error from system level IO::Socket ($!), IO::Socket::Paranoid ($@) or SSL level IO::Socket::SSL.
+      my $Err = $! || $@ || ($SSLOpt ? IO::Socket::SSL::errstr() : "") || "Unknown";
+      $! = 0; # Clear so only $@ is set
+      $@ = "IMAPTalk: socket connection failed - $Err";
+      return undef;
+    }
 
     # Force flushing after every write to the socket
     my $ofh = select($Socket); $| = 1; select ($ofh);
@@ -614,7 +626,10 @@ sub new {
   if ($Args{Server} || $Args{ExpectGreeting}) {
     $Self->{CmdId} = "*";
     my ($CompletionResp, $DataResp) = $Self->_parse_response('');
-    return undef if $CompletionResp !~ /^ok/i;
+    if ($CompletionResp !~ /^ok/i) {
+      $@ = "IMAPTalk: Unexpected greeting line: $CompletionResp";
+      return undef;
+    }
 
     # At this point, the cached "remainder" should be the banner greeting.  We'll
     # save this into the ServerGreeting cache entry so we can refer to it later,
