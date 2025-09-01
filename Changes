@@ -1,6 +1,7 @@
 Revision history for Perl extension Mail::IMAPTalk.
 
 {{$NEXT}}
+  - Fix typo (RT#113877), thanks Florian Schlichting
 
 4.07      2025-08-25 10:04:00+10:00 Australia/Melbourne
   - Implement replace and unselect_or_close
