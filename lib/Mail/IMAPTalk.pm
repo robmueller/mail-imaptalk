@@ -1,4 +1,5 @@
 package Mail::IMAPTalk;
+
 use strict;
 use warnings;
 
@@ -124,8 +125,6 @@ sub import {
 
   goto &Exporter::import;
 }
-
-our $VERSION = '4.07';
 # }}}
 
 # Use modules {{{
