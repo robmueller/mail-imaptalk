@@ -4153,7 +4153,7 @@ An unquoted string, simply returns the string.
 
 =item *
 
-A quoted string, unquotes the string, changes any occurances
+A quoted string, unquotes the string, changes any occurrences
 of \" to " and returns the string.
 
 =item *
