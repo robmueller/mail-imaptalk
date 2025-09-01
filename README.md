@@ -185,6 +185,12 @@ specified in several ways:
         The string/data in the value is sent as an IMAP literal
         regardless of the actual data in the string/data.
 
+    - 'Binary'
+
+        The string/data in the value is sent as an IMAP literal8
+        regardless of the actual data in the string/data.
+        (see RFC 3516)
+
     - 'Quote'
 
         The string/data in the value is sent as an IMAP quoted string
@@ -198,6 +204,8 @@ specified in several ways:
         $IMAP->append("inbox", { Literal => $MsgTxt })
         # Append MSGFILE contents as new message
         $IMAP->append("inbox", \*MSGFILE ])
+        # Append $MsgTxt as UTF-8 string. Assumes UTF8=ACCEPT is enabled.
+        $IMAP->append("inbox", { LiteralUtf8 => $MsgTxt })
 
 # CONSTANTS
 
@@ -346,6 +354,13 @@ for more details about IMAP connection states.
         If supplied, passed along with RootFolder to the `set_root_folder()`
         method.
 
+    - **NoLiteralPlus**
+
+        If set, this avoids ever sending literal+ non-synchronising literals.
+        The default is off (false value).  Use this if you're dealing with a
+        buggy server that doesn't handle literal+ correctly.  Also turns off
+        RFC7888 "literal-" support.
+
     Examples:
 
         $imap = Mail::IMAPTalk->new(
@@ -373,6 +388,10 @@ for more details about IMAP connection states.
     commands, depending on what the server advertises support for.
 
     If `$AsUser` is supplied, an attempt will be made to login on behalf of that user.
+
+- _authenticate($Sasl)_
+
+    Attempt to authenticate using the given Authen::SASL object
 
 - _logout()_
 
@@ -456,21 +475,41 @@ for more details about IMAP connection states.
     If not, it calls set\_root\_folder to recreate the settings with the new
     Separator.
 
-- _literal\_handle\_control(optional $FileHandle)_
+- _literal\_handle\_control(optional $FileHandle or sub { })_
 
     Sets the mode whether to read literals as file handles or scalars.
 
-    You should pass a filehandle here that any literal will be read into. To
-    turn off literal reads into a file handle, pass a 0.
+    There's three options here:
+      \* undef/0 - always read literals into a scalar in memory
+      \* filehandle - always read literals into the given filehandle
+         note: you'll need to make sure you're 'fetch' call only
+         returns a single literal, so you won't want to do
+         much more than ->fetch($uid, "rfc822")
+      \* sub - whenever we parse an imap response and encounter a
+         literal, call this sub, and if it returns a filehandle read
+         into that filehandle, otherwise read into a scalar in memory
+
+    If a sub is used, when called it's passed two arguments:
+      \* bytes - the size of the literal in bytes
+      \* previous atom - if parsing a list response, the previous
+         atom that was parsed. Useful when parsing "fetch" responses
+         since you get key/value type list in the fetch response
 
     Examples:
 
         # Read rfc822 text of message 3 into file
         # (note that the file will have /r/n line terminators)
-        open(F, ">messagebody.txt");
-        $IMAP->literal_handle_control(\*F);
+        open(my $fh, ">messagebody.txt");
+        $IMAP->literal_handle_control($fh);
         $IMAP->fetch(3, 'rfc822');
         $IMAP->literal_handle_control(0);
+
+        # Read the full rfc822 content into a filehandle, but the headers into a scalar
+        $IMAP->literal_handle_control(sub { lc $_[1] eq 'rfc822' ? scalar File::Temp::tempfile() : undef });
+        my $res = $IMAP->fetch(3, [ qw(rfc822 rfc822.header) ]);
+        $IMAP->literal_handle_control(0);
+        my $filehandle = $res->{3}->{rfc822};
+        my $hdrstxt = $res->{3}->{'rfc822.header'};
 
 - _release\_socket($Close)_
 
@@ -630,6 +669,17 @@ for more details about IMAP connection states.
     and IMAPTalk will leave folder names as bytes when
     sending to and returning results from the IMAP server.
 
+- _get\_select\_state()_
+
+    Returns an opaque value that represents the current selected
+    state and folder. You can call select, unselect, etc
+    and then later call set\_select\_state(...) to return
+    to the previous selected state.
+
+- _set\_select\_state($state)_
+
+    Restores selected state to a value returned from get\_select\_state
+
 # IMAP FOLDER COMMAND METHODS
 
 **Note:** In all cases where a folder name is used, 
@@ -645,18 +695,29 @@ prefix as described in `set_root_folder()`.
     Mail::IMAPTalk will cache the currently selected folder, and if you
     issue another ->select("XYZ") for the folder that is already selected,
     it will just return immediately. This can confuse code that expects
-    to get side effects of a select call. For that case, call ->unselect()
-    first, then ->select().
+    to get side effects of a select call. For that case, call ->unselect (or
+    \->unselect\_or\_close) first, then ->select.
 
 - _unselect()_
 
     Performs the standard IMAP unselect command.
+
+- _unselect\_or\_close()_
+
+    Perform the IMAP "unselect" command if the capability is present in the server,
+    otherwise perform the "close" command.
 
 - _examine($FolderName)_
 
     Perform the standard IMAP 'examine' command to select a folder in read only
     mode for retrieving messages. This is the same as `select($FolderName, 1)`.
     See `select()` for more details.
+
+- _select\_with\_state($FolderName)_
+
+    Perform the standard IMAP 'select' command to select a folder.
+    This returns hashref of uidnext, uidvalidity and messagecount when successful
+    and an undef otherwise.
 
 - _create($FolderName)_
 
@@ -1201,97 +1262,6 @@ prefix as described in `set_root_folder()`.
 
     Run the xannotator command on the given message id's
 
-- _xconvfetch($CIDs, $ChangedSince, $Items)_
-
-    Use the server XCONVFETCH command to fetch information about messages
-    in a conversation.
-
-    CIDs can be a single CID or an array ref of CIDs.
-
-        my $Res = $IMAP->xconvfetch('2fc2122a109cb6c8', 0, '(uid cid envelope)')
-        $Res = {
-          state => { CID => [ HighestModSeq ], ... }
-          folders => [ [ FolderName, UidValidity ], ..., ],
-          found => [ [ FolderIndex, Uid, { Details } ], ... ],
-        }
-
-    Note: FolderIndex is an integer index into the folders list
-
-- _xconvmeta($CIDs, $Items)_
-
-    Use the server XCONVMETA command to fetch information about
-    a conversation.
-
-    CIDs can be a single CID or an array ref of CIDs.
-
-        my $Res = $IMAP->xconvmeta('2fc2122a109cb6c8', '(senders exists unseen)')
-        $Res = {
-          CID1 => { senders => { name => ..., email => ... }, exists => ..., unseen => ..., ...  },
-          CID2 => { ...  },
-        }
-
-- _xconvsort($Sort, $Window, $Charset, @SearchParams)_
-
-    Use the server XCONVSORT command to fetch exemplar conversation
-    messages in a mailbox.
-
-        my $Res = $IMAP->xconvsort( [ qw(reverse arrival) ], [ 'conversations', position => [1, 10] ], 'utf-8', 'ALL')
-        $Res = {
-          sort => [ Uid, ... ],
-          position => N,
-          highestmodseq => M,
-          uidvalidity => V,
-          uidnext => U,
-          total => R,
-        }
-
-- _xconvupdates($Sort, $Window, $Charset, @SearchParams)_
-
-    Use the server XCONVUPDATES command to find changed exemplar
-    messages
-
-        my $Res = $IMAP->xconvupdates( [ qw(reverse arrival) ], [ 'conversations', changedsince => [ $mod_seq, $uid_next ] ], 'utf-8', 'ALL');
-        $Res = {
-          added => [ [ Uid, Pos ], ... ],
-          removed => [ Uid, ... ],
-          changed => [ CID, ... ],
-          highestmodseq => M,
-          uidvalidity => V,
-          uidnext => U,
-          total => R,
-        }
-
-- _xconvmultisort($Sort, $Window, $Charset, @SearchParams)_
-
-    Use the server XCONVMULTISORT command to fetch messages across
-    all mailboxes
-
-        my $Res = $IMAP->xconvmultisort( [ qw(reverse arrival) ], [ 'conversations', postion => [1,10] ], 'utf-8', 'ALL')
-        $Res = {
-          folders => [ [ FolderName, UidValidity ], ... ],
-          sort => [ FolderIndex, Uid ], ... ],
-          position => N,
-          highestmodseq => M,
-          total => R,
-        }
-
-    Note: FolderIndex is an integer index into the folders list
-
-- _xsnippets($Items, $Charset, @SearchParams)_
-
-    Use the server XSNIPPETS command to fetch message search snippets
-
-        my $Res = $IMAP->xsnippets( [ [ FolderName, UidValidity, [ Uid, ... ] ], ... ], 'utf-8', 'ALL')
-        $Res = {
-          folders => [ [ FolderName, UidValidity ], ... ],
-          snippets => [
-            [ FolderIndex, Uid, Location, Snippet ],
-            ...
-          ]
-        ]
-
-    Note: FolderIndex is an integer index into the folders list
-
 # IMAP HELPER FUNCTIONS
 
 - _get\_body\_part($BodyStruct, $PartNum)_
@@ -1407,6 +1377,16 @@ prefix as described in `set_root_folder()`.
 
     Given a username (optionally username\\@domain) immediately delete all messages belonging
     to this user.  Uses LOCALDELETE.  Quite FastMail Patchd Cyrus specific.
+
+- _make\_sequence\_set($MessageIds)_
+
+        my $SetSeq = $IMAP->make_sequence_set($Ids);
+
+    This method returns a reference to a `sequence-set` string suitable for use in
+    IMAP commands.  A reference is returned instead of a string so that the
+    result can be passed directly to IMAP-generating methods and the sequence set
+    will not be quoted.  (This quoting is especially problematic when quoting a
+    range like `1:*`).
 
 # IMAP CALLBACKS
 
@@ -1688,7 +1668,6 @@ Would have the result:
         }
       }
     }
-           
 
 # INTERNAL METHODS
 
@@ -1785,7 +1764,7 @@ Would have the result:
     If the next atom is:
 
     - An unquoted string, simply returns the string.
-    - A quoted string, unquotes the string, changes any occurances
+    - A quoted string, unquotes the string, changes any occurrences
     of \\" to " and returns the string.
     - A literal (e.g. {NBytes}\\r\\n), reads the number of bytes of data
     in the literal into a scalar or file (depending on `literal_handle_control`).
@@ -1874,29 +1853,6 @@ Would have the result:
     Unchanges a folder name based on the current root folder prefix as set
     with the `set_root_prefix()` call.
 
-- _\_fix\_message\_ids($MessageIds)_
-
-    Used by IMAP commands to handle a number of different ways that message
-    IDs can be specified.
-
-- _Method arguments_
-
-    - **$MessageIds**
-
-        String or array ref which specified the message IDs or UIDs.
-
-    The $MessageIds parameter may take the following forms:
-
-    - **array ref**
-
-        Array is turned into a string of comma separated ID numbers.
-
-    - **1:\***
-
-        Normally a \* would result in the message ID string being quoted.
-        This ensure that such a range string is not quoted because some
-        servers (e.g. cyrus) don't like.
-
 - _\_parse\_email\_address($EmailAddressList)_
 
     Converts a list of IMAP email address structures as parsed and returned
@@ -1965,6 +1921,65 @@ Would have the result:
 
     Called by Perl when this object is destroyed. Logs out of the
     IMAP server if still connected.
+
+# GMAIL, OFFICE 365, YAHOO and OAUTHBEARER/XOAUTH2
+
+GMail, Office 365 and Yahoo are all moving to OAUTH authentication using
+the XOAUTH2 SASL mechanism. Authen::SASL 2.1800 and above support
+OAUTHBEARER and XOAUTH2 so if you have that version or greater you can
+just use:
+
+    my $sasl = Authen::SASL->new(
+      mechanism => 'XOAUTH2' / 'OAUTHBEARER',
+      callback => {
+        user => $username,
+        pass => $token,
+      }
+    );
+
+    $login_res = $connection->authenticate($sasl);
+
+If you have an older version, you can use the following simple
+module instead:
+
+    package Authen::SASL::Perl::XOAUTH2;
+
+    use strict;
+    use warnings
+    use parent qw(Authen::SASL::Perl);
+
+    sub _order { 1 }
+    my @FLAGS;
+    sub _secflags { @FLAGS }
+    sub mechanism { 'XOAUTH2' }
+
+    sub client_start {
+      my $self = shift;
+
+      $self->{error} = undef;
+      $self->{need_step} = 0;
+
+      my ($user, $pass) = map {
+        my $v = $self->_call($_);
+        defined($v) ? $v : ''
+      } qw(user pass);
+
+      return "user=$user\001auth=Bearer $pass\001\001";
+    }
+
+    1;
+
+And then authenticate using:
+
+    my $sasl = Authen::SASL->new(
+      mechanism => 'XOAUTH2',
+      callback => {
+        user => $username,
+        pass => $token,
+      }
+    );
+
+    $login_res = $connection->authenticate($sasl);
 
 # SEE ALSO
 
